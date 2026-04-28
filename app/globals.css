@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --muted: #64748b;
+  --ring: rgba(99, 102, 241, 0.25);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--foreground);
+  background:
+    radial-gradient(circle at top, rgba(191, 219, 254, 0.9), rgba(238, 242, 255, 0.85) 32%, rgba(248, 250, 252, 1) 68%),
+    linear-gradient(to bottom, #f8fafc, #eef2ff);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(99, 102, 241, 0.18);
+  color: #312e81;
+}
+
+a,
+button,
+input,
+textarea,
+select {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--ring);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.65);
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: linear-gradient(to bottom, #94a3b8, #64748b);
+  border: 2px solid rgba(226, 232, 240, 0.65);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(to bottom, #64748b, #475569);
+}
+
+hr {
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+::placeholder {
+  color: #94a3b8;
+}

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <defs>
+    <radialGradient id="bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(600 0) rotate(90) scale(700 1200)">
+      <stop offset="0%" stop-color="#DBEAFE"/>
+      <stop offset="38%" stop-color="#EEF2FF"/>
+      <stop offset="100%" stop-color="#F8FAFC"/>
+    </radialGradient>
+    <filter id="shadow" x="0" y="0" width="1200" height="630" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#0F172A" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="45" width="1060" height="540" rx="36" fill="white" fill-opacity="0.9"/>
+    <rect x="70.5" y="45.5" width="1059" height="539" rx="35.5" stroke="white" stroke-opacity="0.7"/>
+  </g>
+
+  <rect x="112" y="82" width="60" height="60" rx="18" fill="#0F172A"/>
+  <text x="142" y="120" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800" fill="white">WK</text>
+
+  <text x="194" y="118" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" letter-spacing="3" fill="#475569">WE KEEP</text>
+
+  <text x="112" y="275" font-family="Arial, Helvetica, sans-serif" font-size="76" font-weight="900" fill="#0F172A">Keep promises</text>
+  <text x="112" y="355" font-family="Arial, Helvetica, sans-serif" font-size="76" font-weight="900" fill="#0F172A">visible</text>
+
+  <text x="112" y="435" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#475569">
+    Solo tasks, mutual accountability, history, profile, and progress tracking.
+  </text>
+
+  <rect x="112" y="500" width="178" height="44" rx="22" fill="#0F172A"/>
+  <text x="201" y="528" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="white">Accountability</text>
+
+  <rect x="306" y="500" width="186" height="44" rx="22" fill="#E2E8F0"/>
+  <text x="399" y="528" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="#0F172A">Shared progress</text>
+</svg>

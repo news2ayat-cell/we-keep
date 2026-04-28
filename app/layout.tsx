@@ -1,10 +1,6 @@
-import type { Metadata } from "next";
 import "./globals.css";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-
-export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+export const metadata = {
   title: {
     default: "We Keep",
     template: "%s | We Keep",
@@ -25,37 +21,6 @@ export const metadata: Metadata = {
   authors: [{ name: "We Keep" }],
   creator: "We Keep",
   publisher: "We Keep",
-  formatDetection: {
-    email: false,
-    address: false,
-    telephone: false,
-  },
-  alternates: {
-    canonical: "/",
-  },
-  openGraph: {
-    type: "website",
-    url: siteUrl,
-    siteName: "We Keep",
-    title: "We Keep",
-    description:
-      "Track solo and mutual commitments with accountability, progress, and history.",
-    images: [
-      {
-        url: "/opengraph-image.svg",
-        width: 1200,
-        height: 630,
-        alt: "We Keep commitment tracking app",
-      },
-    ],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "We Keep",
-    description:
-      "Track solo and mutual commitments with accountability, progress, and history.",
-    images: ["/twitter-image.svg"],
-  },
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",
@@ -66,9 +31,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en">
       <body>{children}</body>

@@ -1,123 +1,172 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { LogIn, ShieldCheck, Sparkles } from "lucide-react";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [checkingUser, setCheckingUser] = useState(true);
+
+  useEffect(() => {
+    const checkUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        router.replace("/dashboard");
+        return;
+      }
+
+      setCheckingUser(false);
+    };
+
+    checkUser();
+  }, [router]);
+
   const handleGoogleLogin = async () => {
-    const redirectTo = `${window.location.origin}/dashboard`;
+    setLoading(true);
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo,
+        redirectTo: `${window.location.origin}/dashboard`,
       },
     });
 
     if (error) {
+      console.error(error);
       alert("Google login failed.");
+      setLoading(false);
     }
   };
 
-  return (
-    <motion.main
-      initial={{ opacity: 0, y: 18 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-6 py-8"
-    >
-      <div className="mx-auto flex min-h-[85vh] max-w-6xl items-center">
-        <div className="grid w-full gap-8 lg:grid-cols-2">
-          <motion.div
-            initial={{ opacity: 0, x: -18 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.08, duration: 0.4 }}
-            className="flex flex-col justify-center"
-          >
-            <Link href="/" className="text-sm text-gray-600 hover:underline">
-              ← Back to Home
-            </Link>
+  if (checkingUser) {
+    return (
+      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mx-auto max-w-2xl rounded-[32px] border border-white/60 bg-white/80 p-8 shadow-2xl backdrop-blur-xl sm:p-10">
+          <p className="text-sm text-slate-600">Checking login status...</p>
+        </div>
+      </main>
+    );
+  }
 
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100">
-                We Keep
-              </span>
-              <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-black/5">
-                Personal + Mutual Accountability
-              </span>
+  return (
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-6 rounded-[30px] border border-white/60 bg-white/80 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+          <Link href="/" className="text-sm text-slate-600 hover:underline">
+            ← Back to Home
+          </Link>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[1.05fr_1.2fr]">
+          <section className="rounded-[32px] border border-white/60 bg-white/80 p-8 shadow-2xl backdrop-blur-xl sm:p-10">
+            <div className="inline-flex rounded-full bg-indigo-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700 ring-1 ring-indigo-100">
+              Secure access
             </div>
 
-            <h1 className="mt-5 text-5xl font-black tracking-tight text-slate-900">
-              Make promises feel
-              <span className="block text-indigo-600">real.</span>
+            <h1 className="mt-6 text-4xl font-black tracking-tight text-slate-900 sm:text-5xl">
+              Login to
+              <span className="block text-indigo-600">We Keep</span>
             </h1>
 
-            <p className="mt-4 max-w-xl text-base leading-7 text-slate-600">
-              Track personal commitments, build mutual accountability, and make
-              follow-through feel clear, premium, and emotionally satisfying.
+            <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
+              Sign in with Google to manage solo commitments, mutual promises,
+              request approvals, and completion history.
             </p>
 
-            <div className="mt-8 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-white/60 bg-white/70 p-4 shadow-lg backdrop-blur">
-                <div className="flex items-center gap-2 text-slate-900">
-                  <Sparkles size={18} />
-                  <p className="font-semibold">Clean experience</p>
-                </div>
-                <p className="mt-2 text-sm text-slate-600">
-                  Beautiful flow for capturing and tracking commitments.
-                </p>
-              </div>
+            <div className="mt-8 flex flex-col gap-3">
+              <button
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                className="inline-flex items-center justify-center rounded-2xl bg-black px-5 py-4 text-sm font-medium text-white shadow-xl shadow-black/10 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {loading ? "Redirecting to Google..." : "Continue with Google"}
+              </button>
 
-              <div className="rounded-2xl border border-white/60 bg-white/70 p-4 shadow-lg backdrop-blur">
-                <div className="flex items-center gap-2 text-slate-900">
-                  <ShieldCheck size={18} />
-                  <p className="font-semibold">Trusted sign in</p>
-                </div>
-                <p className="mt-2 text-sm text-slate-600">
-                  Sign in securely with your Google account.
-                </p>
-              </div>
+              <p className="text-sm text-slate-500">
+                After login, you will be taken directly to your dashboard.
+              </p>
             </div>
-          </motion.div>
+          </section>
 
-          <motion.div
-            initial={{ opacity: 0, x: 18 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.12, duration: 0.4 }}
-            className="flex items-center justify-center"
-          >
-            <div className="w-full max-w-md rounded-[32px] border border-white/60 bg-white/80 p-8 shadow-2xl backdrop-blur-xl">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-black text-white shadow-xl">
-                <LogIn size={28} />
-              </div>
+          <section className="rounded-[32px] border border-white/60 bg-white/80 p-8 shadow-2xl backdrop-blur-xl sm:p-10">
+            <div className="rounded-[28px] bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 p-6 text-white shadow-xl">
+              <p className="text-sm uppercase tracking-[0.18em] text-slate-300">
+                What you get
+              </p>
 
-              <h2 className="mt-6 text-center text-3xl font-black tracking-tight text-slate-900">
-                Welcome back
+              <h2 className="mt-3 text-3xl font-black tracking-tight">
+                Accountability that feels structured
               </h2>
 
-              <p className="mt-2 text-center text-sm leading-6 text-slate-600">
-                Continue with Google to enter your dashboard and manage your
-                commitments.
-              </p>
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-[24px] bg-white/10 p-4 ring-1 ring-white/10">
+                  <p className="text-xs uppercase tracking-[0.15em] text-slate-300">
+                    Step 1
+                  </p>
+                  <p className="mt-2 text-lg font-bold">
+                    Create personal commitments
+                  </p>
+                </div>
 
-              <motion.button
-                whileHover={{ scale: 1.015 }}
-                whileTap={{ scale: 0.985 }}
-                onClick={handleGoogleLogin}
-                className="mt-8 w-full rounded-2xl bg-black px-5 py-4 text-sm font-semibold text-white shadow-xl shadow-black/10 transition"
-              >
-                Continue with Google
-              </motion.button>
+                <div className="rounded-[24px] bg-white/10 p-4 ring-1 ring-white/10">
+                  <p className="text-xs uppercase tracking-[0.15em] text-slate-300">
+                    Step 2
+                  </p>
+                  <p className="mt-2 text-lg font-bold">
+                    Send mutual requests
+                  </p>
+                </div>
 
-              <p className="mt-4 text-center text-xs leading-6 text-slate-500">
-                By continuing, you use your Google account to sign in securely.
-              </p>
+                <div className="rounded-[24px] bg-white/10 p-4 ring-1 ring-white/10">
+                  <p className="text-xs uppercase tracking-[0.15em] text-slate-300">
+                    Step 3
+                  </p>
+                  <p className="mt-2 text-lg font-bold">
+                    Accept and track progress
+                  </p>
+                </div>
+
+                <div className="rounded-[24px] bg-white/10 p-4 ring-1 ring-white/10">
+                  <p className="text-xs uppercase tracking-[0.15em] text-slate-300">
+                    Step 4
+                  </p>
+                  <p className="mt-2 text-lg font-bold">
+                    Confirm full completion
+                  </p>
+                </div>
+              </div>
             </div>
-          </motion.div>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-[26px] border border-slate-200 bg-slate-50 p-5">
+                <h3 className="text-xl font-black tracking-tight text-slate-900">
+                  Personal commitments
+                </h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600">
+                  Keep your own promises visible with reminders, due dates, and
+                  status tracking.
+                </p>
+              </div>
+
+              <div className="rounded-[26px] border border-slate-200 bg-slate-50 p-5">
+                <h3 className="text-xl font-black tracking-tight text-slate-900">
+                  Mutual accountability
+                </h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600">
+                  Build shared commitments where both sides can accept, track,
+                  and confirm completion.
+                </p>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
-    </motion.main>
+    </main>
   );
 }

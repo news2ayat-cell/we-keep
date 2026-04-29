@@ -22,6 +22,7 @@ import {
   Plus,
   Search,
   ShieldAlert,
+  Sparkles,
   Trash2,
   Users,
   XCircle,
@@ -455,7 +456,15 @@ export default function DashboardPage() {
     const loadPage = async () => {
       const {
         data: { user },
+        error,
       } = await supabase.auth.getUser();
+
+      if (error) {
+        await supabase.auth.signOut();
+        setIsLoggedIn(false);
+        setMounted(true);
+        return;
+      }
 
       if (user?.email) {
         setIsLoggedIn(true);
@@ -663,21 +672,39 @@ export default function DashboardPage() {
 
     showToast("Marked as done", "This commitment is now completed.", "success");
   };
-
-  const handleMarkMySideDone = async (commitment: Commitment) => {
+    const handleMarkMySideDone = async (commitment: Commitment) => {
     const isOwner = commitment.createdBy === userId;
 
-    const nextCreatorDone = isOwner ? true : commitment.creatorDone;
-    const nextPartnerDone = isOwner ? commitment.partnerDone : true;
-    const nextStatus = nextCreatorDone && nextPartnerDone ? "done" : "pending";
+    const { data: latestRow, error: fetchError } = await supabase
+      .from("commitments")
+      .select("*")
+      .eq("id", commitment.id)
+      .single();
 
-    const updatePayload = isOwner
-      ? { creator_done: true, status: nextStatus }
-      : { partner_done: true, status: nextStatus };
+    if (fetchError || !latestRow) {
+      showToast(
+        "Could not load latest commitment state",
+        `${fetchError?.message ?? "Unknown error"}${
+          fetchError?.code ? ` (${fetchError.code})` : ""
+        }`,
+        "error"
+      );
+      return;
+    }
+
+    const latest = mapRowToCommitment(latestRow as DashboardRow);
+
+    const nextCreatorDone = isOwner ? true : latest.creatorDone;
+    const nextPartnerDone = isOwner ? latest.partnerDone : true;
+    const nextStatus = nextCreatorDone && nextPartnerDone ? "done" : "pending";
 
     const { error } = await supabase
       .from("commitments")
-      .update(updatePayload)
+      .update({
+        creator_done: nextCreatorDone,
+        partner_done: nextPartnerDone,
+        status: nextStatus,
+      })
       .eq("id", commitment.id);
 
     if (error) {
@@ -801,8 +828,12 @@ export default function DashboardPage() {
     showToast(
       "Clear finished",
       lockedCount > 0
-        ? `${clearedCount} cleared. ${lockedCount} locked mutual commitment${lockedCount > 1 ? "s were" : " was"} kept.`
-        : `${clearedCount} commitment${clearedCount > 1 ? "s were" : " was"} cleared.`,
+        ? `${clearedCount} cleared. ${lockedCount} locked mutual commitment${
+            lockedCount > 1 ? "s were" : " was"
+          } kept.`
+        : `${clearedCount} commitment${
+            clearedCount > 1 ? "s were" : " was"
+          } cleared.`,
       "success"
     );
   };
@@ -821,11 +852,7 @@ export default function DashboardPage() {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-
-    if (isNaN(date.getTime())) {
-      return dateString;
-    }
-
+    if (isNaN(date.getTime())) return dateString;
     return date.toLocaleString();
   };
 
@@ -851,6 +878,14 @@ export default function DashboardPage() {
   };
 
   const getDisplayStatus = (commitment: Commitment): DisplayStatus => {
+    if (
+      commitment.mode === "mutual" &&
+      commitment.creatorDone &&
+      commitment.partnerDone
+    ) {
+      return "Done";
+    }
+
     if (commitment.status === "done") return "Done";
     if (commitment.status === "rejected") return "Rejected";
     if (commitment.status === "awaiting_acceptance") return "Awaiting";
@@ -863,6 +898,51 @@ export default function DashboardPage() {
     }
 
     return "Pending";
+  };
+
+  const getStatusTheme = (displayStatus: DisplayStatus) => {
+    if (displayStatus === "Done") {
+      return {
+        badge: "bg-emerald-300 text-emerald-950",
+        card: "border-emerald-300/70 bg-[#042a22]",
+        rail: "bg-emerald-300",
+        glow: "shadow-[0_0_45px_rgba(16,185,129,0.18)]",
+      };
+    }
+
+    if (displayStatus === "Overdue") {
+      return {
+        badge: "bg-rose-400 text-white",
+        card: "border-rose-300/75 bg-[#3a0712]",
+        rail: "bg-rose-400",
+        glow: "shadow-[0_0_45px_rgba(244,63,94,0.2)]",
+      };
+    }
+
+    if (displayStatus === "Awaiting") {
+      return {
+        badge: "bg-sky-300 text-sky-950",
+        card: "border-sky-300/75 bg-[#06283f]",
+        rail: "bg-sky-300",
+        glow: "shadow-[0_0_45px_rgba(56,189,248,0.2)]",
+      };
+    }
+
+    if (displayStatus === "Rejected") {
+      return {
+        badge: "bg-slate-400 text-slate-950",
+        card: "border-slate-400/60 bg-[#1f2937]",
+        rail: "bg-slate-400",
+        glow: "shadow-[0_0_35px_rgba(148,163,184,0.12)]",
+      };
+    }
+
+    return {
+      badge: "bg-amber-300 text-amber-950",
+      card: "border-amber-300/75 bg-[#352407]",
+      rail: "bg-amber-300",
+      glow: "shadow-[0_0_45px_rgba(251,191,36,0.2)]",
+    };
   };
 
   const handleCopyReminder = async (
@@ -987,69 +1067,6 @@ export default function DashboardPage() {
       };
     }
 
-    if (view === "Solo") {
-      return {
-        title: "No solo commitments here",
-        description:
-          "Create a personal task, reminder, or promise to see it in this tab.",
-      };
-    }
-
-    if (view === "My Mutual") {
-      return {
-        title: "No mutual commitments created by you",
-        description:
-          "Create a shared promise with another person to populate this section.",
-      };
-    }
-
-    if (view === "Incoming Mutual") {
-      return {
-        title: "No incoming mutual commitments",
-        description:
-          "When someone invites your email into a shared commitment, it will appear here.",
-      };
-    }
-
-    if (filter === "Awaiting") {
-      return {
-        title: "Nothing is awaiting action",
-        description:
-          "There are no commitments in an awaiting state for the current view.",
-      };
-    }
-
-    if (filter === "Done") {
-      return {
-        title: "Nothing completed yet",
-        description:
-          "Completed items will appear here after they are marked done.",
-      };
-    }
-
-    if (filter === "Rejected") {
-      return {
-        title: "No rejected commitments",
-        description: "Rejected mutual requests will show up here if any exist.",
-      };
-    }
-
-    if (filter === "Overdue") {
-      return {
-        title: "Nothing overdue",
-        description:
-          "Good. There are no overdue commitments in this current view.",
-      };
-    }
-
-    if (filter === "Today") {
-      return {
-        title: "Nothing due today",
-        description:
-          "You do not have any commitments due today in this current view.",
-      };
-    }
-
     return {
       title: "No commitments found",
       description:
@@ -1058,33 +1075,39 @@ export default function DashboardPage() {
   };
 
   const filterButtonClass = (name: FilterType) =>
-    `inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
+    `inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-black transition ${
       filter === name
-        ? "bg-black text-white shadow-lg"
-        : "bg-white/70 text-gray-700 ring-1 ring-black/5 hover:bg-white"
+        ? "bg-white text-black shadow-xl shadow-white/10"
+        : "border border-white/10 bg-white/[0.05] text-white/65 hover:bg-white/[0.09] hover:text-white"
     }`;
 
   const viewButtonClass = (name: ViewType) =>
-    `inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
+    `inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-black transition ${
       view === name
-        ? "bg-indigo-600 text-white shadow-lg shadow-indigo-200"
-        : "bg-white/70 text-gray-700 ring-1 ring-black/5 hover:bg-white"
+        ? "bg-indigo-300 text-black shadow-xl shadow-indigo-500/20"
+        : "border border-white/10 bg-white/[0.05] text-white/65 hover:bg-white/[0.09] hover:text-white"
     }`;
 
-  const headerGhostButtonClass =
-    "inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white px-5 py-3 text-sm font-medium text-gray-800 shadow-sm transition hover:scale-[1.02]";
-
-  const headerDarkButtonClass =
-    "inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-black px-5 py-3 text-sm font-medium text-white shadow-xl shadow-black/10 transition hover:scale-[1.02]";
-
   const cardNeutralButtonClass =
-    "inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-sm";
+    "inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white/85 shadow-sm transition hover:bg-white/[0.1] sm:w-auto";
+
+  const emptyState = getEmptyState();
 
   if (!mounted) {
     return (
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mx-auto max-w-6xl">
-          <p className="text-sm text-gray-600">Loading dashboard...</p>
+      <main className="flex min-h-screen items-center justify-center overflow-hidden bg-[#07070a] px-4 text-white">
+        <div className="relative rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-black">
+              <Sparkles size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-black">Loading dashboard</p>
+              <p className="mt-1 text-xs text-white/45">
+                Reading your commitments...
+              </p>
+            </div>
+          </div>
         </div>
       </main>
     );
@@ -1092,22 +1115,25 @@ export default function DashboardPage() {
 
   if (!isLoggedIn) {
     return (
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mx-auto max-w-2xl rounded-[28px] border border-white/60 bg-white/80 p-6 sm:p-8 shadow-2xl backdrop-blur">
-          <Link href="/" className="text-sm text-gray-600 hover:underline">
+      <main className="min-h-screen overflow-hidden bg-[#07070a] px-4 py-6 text-white sm:px-6 sm:py-8">
+        <div className="relative mx-auto max-w-2xl rounded-[34px] border border-white/10 bg-white/[0.06] p-6 shadow-2xl backdrop-blur-xl sm:p-8">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-white/60 hover:text-white"
+          >
             ← Back to Home
           </Link>
 
-          <h1 className="mt-4 text-3xl font-bold text-gray-900">
+          <h1 className="mt-5 text-4xl font-black tracking-tight text-white">
             You are not logged in
           </h1>
-          <p className="mt-2 text-gray-600">
-            Please sign in with Google first.
+          <p className="mt-3 text-sm leading-7 text-white/55">
+            Please sign in with Google first to open your commitments.
           </p>
 
           <Link
             href="/login"
-            className="mt-6 inline-flex rounded-xl bg-black px-5 py-3 text-white transition hover:scale-[1.02]"
+            className="mt-6 inline-flex rounded-2xl bg-white px-5 py-3 text-sm font-black text-black shadow-xl shadow-white/10 transition hover:scale-[1.02]"
           >
             Go to Login
           </Link>
@@ -1115,8 +1141,6 @@ export default function DashboardPage() {
       </main>
     );
   }
-
-  const emptyState = getEmptyState();
 
   return (
     <>
@@ -1157,434 +1181,152 @@ export default function DashboardPage() {
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45 }}
-        className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-4 py-6 sm:px-6 sm:py-8"
+        className="min-h-screen overflow-hidden bg-[#07070a] px-4 pb-28 pt-5 text-white sm:px-6 sm:py-8"
       >
-        <div className="mx-auto max-w-6xl">
-          <motion.div
+        <div className="pointer-events-none fixed inset-0">
+          <div className="absolute left-1/2 top-[-18rem] h-[42rem] w-[42rem] -translate-x-1/2 rounded-full bg-indigo-600/25 blur-3xl" />
+          <div className="absolute right-[-12rem] top-[18rem] h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/15 blur-3xl" />
+          <div className="absolute bottom-[-16rem] left-[-10rem] h-[34rem] w-[34rem] rounded-full bg-cyan-400/10 blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto max-w-7xl">
+          <motion.nav
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+            className="mb-6 flex items-center justify-between rounded-[28px] border border-white/10 bg-white/[0.04] px-4 py-4 shadow-2xl backdrop-blur-xl sm:px-6"
+          >
+            <Link href="/" className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-black shadow-lg">
+                <Sparkles size={20} />
+              </div>
+              <div>
+                <p className="text-lg font-black tracking-tight">We Keep</p>
+                <p className="hidden text-xs text-white/45 sm:block">
+                  Dashboard control room
+                </p>
+              </div>
+            </Link>
+
+            <div className="flex items-center gap-2">
+              <Link
+                href="/commitments/new"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-black shadow-xl shadow-white/10 transition hover:scale-[1.02] sm:px-5"
+              >
+                <Plus size={17} />
+                <span className="hidden sm:inline">New</span>
+              </Link>
+
+              <Link
+                href="/history"
+                className="hidden items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-bold text-white/80 transition hover:bg-white/10 md:inline-flex"
+              >
+                <History size={17} />
+                History
+              </Link>
+
+              <Link
+                href="/profile"
+                className="hidden items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-bold text-white/80 transition hover:bg-white/10 md:inline-flex"
+              >
+                <Users size={17} />
+                Profile
+              </Link>
+
+              <button
+                onClick={handleSignOut}
+                className="hidden items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-bold text-white/80 transition hover:bg-white/10 sm:inline-flex"
+              >
+                <LogOut size={17} />
+                Sign out
+              </button>
+            </div>
+          </motion.nav>
+
+          <motion.section
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35 }}
-            className="mb-6 rounded-[30px] border border-white/60 bg-white/75 p-5 sm:p-6 shadow-2xl backdrop-blur-xl"
+            className="mb-6 overflow-hidden rounded-[38px] border border-white/10 bg-white/[0.06] p-5 shadow-2xl backdrop-blur-2xl sm:p-7 lg:p-8"
           >
-            <div className="flex flex-col gap-5">
+            <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
               <div>
-                <Link href="/" className="text-sm text-gray-600 hover:underline">
-                  ← Back to Home
-                </Link>
-
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <h1 className="break-words text-4xl font-black tracking-tight text-gray-900 sm:text-5xl">
-                    Dashboard
-                  </h1>
-
-                  {(globalAwaitingIncomingCount > 0 || globalOverdueCount > 0) && (
-                    <span className="rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700 ring-1 ring-rose-200">
-                      {globalAwaitingIncomingCount + globalOverdueCount} need attention
-                    </span>
-                  )}
+                <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-indigo-200">
+                  <ShieldAlert size={15} />
+                  Active accountability
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100">
-                    Solo + Mutual
-                  </span>
-                  <span className="max-w-full break-all rounded-full bg-white/80 px-3 py-1 text-xs text-gray-600 ring-1 ring-black/5">
-                    Logged in as: {userEmail}
-                  </span>
-                </div>
+                <h1 className="mt-6 max-w-4xl text-5xl font-black leading-[0.95] tracking-[-0.06em] sm:text-6xl lg:text-7xl">
+                  Keep today&apos;s promises visible.
+                </h1>
+
+                <p className="mt-5 max-w-2xl text-sm leading-7 text-white/58 sm:text-base">
+                  Signed in as {userEmail}. Track solo promises, mutual requests,
+                  overdue items, and completion history from one control room.
+                </p>
               </div>
 
-              <div className="grid gap-3 sm:flex sm:flex-wrap">
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={handleSignOut}
-                  className={headerGhostButtonClass}
+              <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
+                <Link
+                  href="/commitments/new"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 text-sm font-black text-black shadow-2xl shadow-white/10 transition hover:scale-[1.02] sm:w-auto lg:w-full"
                 >
-                  <LogOut size={18} />
-                  Sign Out
-                </motion.button>
-
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => setClearModalOpen(true)}
-                  className="w-full rounded-2xl bg-red-600 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-red-200 sm:w-auto"
-                >
-                  Clear My Created
-                </motion.button>
-
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={focusIncomingRequests}
-                  className={`inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-medium shadow-sm transition ${
-                    globalAwaitingIncomingCount > 0
-                      ? "border border-rose-200 bg-rose-50 text-rose-700 shadow-rose-100"
-                      : "border border-black/10 bg-white text-gray-800"
-                  }`}
-                >
-                  <BellRing size={18} />
-                  Requests
-                  {globalAwaitingIncomingCount > 0 && (
-                    <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-sm">
-                      {globalAwaitingIncomingCount}
-                    </span>
-                  )}
-                </motion.button>
-
-                <Link href="/history" className={headerGhostButtonClass}>
-                  <History size={18} />
-                  History
-                </Link>
-
-                <Link href="/profile" className={headerGhostButtonClass}>
-                  <Users size={18} />
-                  Profile
-                </Link>
-
-                <Link href="/chat-import" className={headerGhostButtonClass}>
-                  <MessageSquareText size={18} />
-                  Paste Chat
-                </Link>
-
-                <Link href="/commitments/new" className={headerDarkButtonClass}>
                   <Plus size={18} />
                   New Commitment
                 </Link>
-              </div>
-            </div>
-          </motion.div>
-
-          {(globalAwaitingIncomingCount > 0 || globalOverdueCount > 0) && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-6 grid gap-4 lg:grid-cols-2"
-            >
-              {globalAwaitingIncomingCount > 0 && (
-                <div className="rounded-[28px] border border-rose-200 bg-gradient-to-br from-rose-50 to-white p-5 shadow-xl">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold uppercase tracking-wide text-rose-700">
-                        Action needed
-                      </p>
-                      <h2 className="mt-2 break-words text-2xl font-black tracking-tight text-slate-900">
-                        {globalAwaitingIncomingCount} request
-                        {globalAwaitingIncomingCount > 1 ? "s" : ""} waiting
-                      </h2>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">
-                        You have incoming mutual commitments waiting for accept
-                        or reject.
-                      </p>
-                    </div>
-
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-rose-100 text-rose-700">
-                      <Inbox size={22} />
-                    </div>
-                  </div>
-
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={focusIncomingRequests}
-                    className="mt-4 inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-rose-200"
-                  >
-                    <ShieldAlert size={16} />
-                    Review requests
-                  </motion.button>
-                </div>
-              )}
-
-              {globalOverdueCount > 0 && (
-                <div className="rounded-[28px] border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5 shadow-xl">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold uppercase tracking-wide text-amber-700">
-                        Attention
-                      </p>
-                      <h2 className="mt-2 break-words text-2xl font-black tracking-tight text-slate-900">
-                        {globalOverdueCount} overdue commitment
-                        {globalOverdueCount > 1 ? "s" : ""}
-                      </h2>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">
-                        Some commitments passed their due date and still need
-                        progress.
-                      </p>
-                    </div>
-
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
-                      <AlertTriangle size={22} />
-                    </div>
-                  </div>
-
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={focusOverdue}
-                    className="mt-4 inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-amber-500 px-4 py-3 text-sm font-medium text-slate-900 shadow-lg shadow-amber-200"
-                  >
-                    <Clock3 size={16} />
-                    View overdue
-                  </motion.button>
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {incomingAwaitingRequests.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-6 rounded-[30px] border border-sky-200 bg-gradient-to-br from-sky-50 to-indigo-50 p-5 sm:p-6 shadow-xl"
-            >
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sky-700 shadow-sm">
-                    <Inbox size={24} />
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="break-words text-2xl font-black tracking-tight text-slate-900">
-                        Request Center
-                      </h2>
-                      <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-200">
-                        {incomingAwaitingRequests.length} waiting
-                      </span>
-                    </div>
-
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                      You have incoming mutual commitments that need your
-                      response. They are shown here first so they do not get
-                      buried.
-                    </p>
-                  </div>
-                </div>
-
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={focusIncomingRequests}
-                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-slate-200"
-                >
-                  <ShieldAlert size={18} />
-                  Open waiting requests
-                </motion.button>
-              </div>
-
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                {incomingAwaitingRequests.slice(0, 4).map((commitment) => {
-                  const creatorLabel = getCreatorLabel(commitment);
-                  const creatorProfile = getCreatorProfile(commitment);
-
-                  return (
-                    <div
-                      key={`request-center-${commitment.id}`}
-                      className="rounded-[24px] border border-white/70 bg-white/85 p-4 shadow-lg"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-sm font-bold text-white shadow-md">
-                          {getInitials(creatorLabel)}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="break-words text-lg font-bold text-slate-900">
-                              {commitment.title}
-                            </p>
-                            <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-200">
-                              Awaiting
-                            </span>
-                          </div>
-
-                          <p className="mt-1 break-words text-sm font-medium text-slate-700">
-                            {creatorLabel} invited you
-                          </p>
-
-                          <p className="mt-1 break-all text-xs text-slate-500">
-                            {creatorProfile?.email || "Shared request"} • Due{" "}
-                            {formatDate(commitment.dueDate)}
-                          </p>
-                        </div>
-                      </div>
-
-                      {commitment.description && (
-                        <p className="mt-3 break-words text-sm leading-6 text-slate-600">
-                          {commitment.description}
-                        </p>
-                      )}
-
-                      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                        <motion.button
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.97 }}
-                          onClick={() => handleAcceptMutual(commitment.id)}
-                          className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-emerald-200"
-                        >
-                          <CheckCheck size={16} />
-                          Accept
-                        </motion.button>
-
-                        <motion.button
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.97 }}
-                          onClick={() => handleRejectMutual(commitment.id)}
-                          className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-rose-200"
-                        >
-                          <XCircle size={16} />
-                          Reject
-                        </motion.button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-
-          {incomingAwaitingRequests.length === 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-6 rounded-[26px] border border-white/60 bg-white/70 p-5 shadow-xl backdrop-blur"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                  <Info size={18} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">
-                    No requests are waiting for your response
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">
-                    When someone invites your email into a mutual commitment, it
-                    will appear in the Request Center and in the Incoming Mutual
-                    tab.
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {!hasAnyCommitments && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-6 rounded-[30px] border border-indigo-100 bg-gradient-to-br from-white to-indigo-50 p-5 sm:p-6 shadow-xl"
-            >
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <h2 className="text-2xl font-black tracking-tight text-slate-900">
-                    First-time setup
-                  </h2>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                    Start with a solo commitment for yourself, or create a
-                    mutual one and invite another person by email.
-                  </p>
-
-                  <div className="mt-5 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-[22px] border border-white/70 bg-white/85 p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">
-                        1. Create something
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">
-                        Begin with a solo promise or a shared commitment.
-                      </p>
-                    </div>
-
-                    <div className="rounded-[22px] border border-white/70 bg-white/85 p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">
-                        2. Accept if mutual
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">
-                        The other side can accept or reject from their request
-                        center.
-                      </p>
-                    </div>
-
-                    <div className="rounded-[22px] border border-white/70 bg-white/85 p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">
-                        3. Finish both sides
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">
-                        Mutual commitments only become done when both sides mark
-                        done.
-                      </p>
-                    </div>
-                  </div>
-                </div>
 
                 <Link
-                  href="/commitments/new"
-                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-black px-5 py-3 text-sm font-medium text-white shadow-xl shadow-black/10"
+                  href="/chat-import"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-4 text-sm font-black text-white/85 shadow-xl backdrop-blur transition hover:bg-white/10 sm:w-auto lg:w-full"
                 >
-                  <Plus size={18} />
-                  Create first commitment
+                  <MessageSquareText size={18} />
+                  Paste Chat
                 </Link>
               </div>
-            </motion.div>
-          )}
+            </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-4 overflow-x-auto pb-2"
-          >
-            <div className="flex min-w-max gap-3">
+            <div className="mt-7 grid gap-3 sm:grid-cols-3">
               <button
-                onClick={() => setView("All")}
-                className={viewButtonClass("All")}
+                onClick={() => setFilter("Today")}
+                className="rounded-[26px] border border-cyan-300/30 bg-cyan-400/10 p-5 text-left shadow-xl transition hover:bg-cyan-400/[0.15]"
               >
-                <span>All ({commitments.length})</span>
+                <p className="text-4xl font-black text-cyan-100">{todayCount}</p>
+                <p className="mt-2 text-sm font-bold text-white/55">Due today</p>
               </button>
 
               <button
-                onClick={() => setView("Solo")}
-                className={viewButtonClass("Solo")}
+                onClick={focusIncomingRequests}
+                className="rounded-[26px] border border-sky-300/35 bg-sky-400/[0.12] p-5 text-left shadow-xl transition hover:bg-sky-400/[0.18]"
               >
-                <span>
-                  Solo ({commitments.filter((item) => item.mode === "solo").length})
-                </span>
+                <p className="text-4xl font-black text-sky-100">
+                  {globalAwaitingIncomingCount}
+                </p>
+                <p className="mt-2 text-sm font-bold text-white/55">
+                  Requests waiting
+                </p>
               </button>
 
               <button
-                onClick={() => setView("My Mutual")}
-                className={viewButtonClass("My Mutual")}
+                onClick={focusOverdue}
+                className="rounded-[26px] border border-rose-300/35 bg-rose-400/[0.12] p-5 text-left shadow-xl transition hover:bg-rose-400/[0.18]"
               >
-                <span>
-                  My Mutual (
-                  {
-                    commitments.filter(
-                      (item) => item.mode === "mutual" && item.createdBy === userId
-                    ).length
-                  }
-                  )
-                </span>
-              </button>
-
-              <button
-                onClick={() => setView("Incoming Mutual")}
-                className={viewButtonClass("Incoming Mutual")}
-              >
-                <span>
-                  Incoming Mutual (
-                  {
-                    commitments.filter(
-                      (item) => item.mode === "mutual" && item.createdBy !== userId
-                    ).length
-                  }
-                  )
-                </span>
-
-                {globalAwaitingIncomingCount > 0 && (
-                  <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                    {globalAwaitingIncomingCount} waiting
-                  </span>
-                )}
+                <p className="text-4xl font-black text-rose-100">
+                  {globalOverdueCount}
+                </p>
+                <p className="mt-2 text-sm font-bold text-white/55">Overdue</p>
               </button>
             </div>
-          </motion.div>
+
+            <div className="mt-5 hidden flex-wrap gap-3 sm:flex">
+              <button
+                onClick={() => setClearModalOpen(true)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-300/20 bg-rose-400/10 px-5 py-3 text-sm font-bold text-rose-100 shadow-xl backdrop-blur transition hover:bg-rose-400/15 sm:w-auto"
+              >
+                <Trash2 size={18} />
+                Clear Created
+              </button>
+            </div>
+          </motion.section>
 
           <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
             {[
@@ -1592,37 +1334,37 @@ export default function DashboardPage() {
                 label: "Total",
                 value: totalCount,
                 icon: CalendarDays,
-                color: "from-slate-900 to-slate-700 text-white",
+                card: "border-white/15 bg-white/[0.06]",
               },
               {
                 label: "Pending",
                 value: pendingCount,
                 icon: Clock3,
-                color: "from-amber-400 to-yellow-500 text-slate-900",
+                card: "border-amber-300/70 bg-[#352407]",
               },
               {
                 label: "Awaiting",
                 value: awaitingCount,
                 icon: Users,
-                color: "from-sky-500 to-indigo-600 text-white",
+                card: "border-sky-300/70 bg-[#06283f]",
               },
               {
                 label: "Done",
                 value: doneCount,
                 icon: CheckCircle2,
-                color: "from-emerald-500 to-green-600 text-white",
+                card: "border-emerald-300/70 bg-[#042a22]",
               },
               {
                 label: "Overdue",
                 value: overdueCount,
                 icon: AlertTriangle,
-                color: "from-rose-500 to-red-600 text-white",
+                card: "border-rose-300/70 bg-[#3a0712]",
               },
               {
                 label: "Due Today",
                 value: todayCount,
                 icon: BellRing,
-                color: "from-cyan-500 to-sky-600 text-white",
+                card: "border-cyan-300/70 bg-[#073342]",
               },
             ].map((item, index) => {
               const Icon = item.icon;
@@ -1632,13 +1374,16 @@ export default function DashboardPage() {
                   key={item.label}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.08 * index, duration: 0.35 }}
-                  whileHover={{ y: -4, scale: 1.01 }}
-                  className={`rounded-[28px] bg-gradient-to-br ${item.color} p-5 shadow-xl`}
+                  transition={{ delay: 0.04 * index, duration: 0.35 }}
+                  className={`rounded-[30px] border p-5 shadow-2xl backdrop-blur-xl ${item.card}`}
                 >
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium opacity-90">{item.label}</p>
-                    <Icon size={22} className="opacity-90" />
+                    <p className="text-sm font-bold text-white/70">
+                      {item.label}
+                    </p>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-black">
+                      <Icon size={18} />
+                    </div>
                   </div>
                   <p className="mt-5 text-4xl font-black tracking-tight">
                     {item.value}
@@ -1651,18 +1396,58 @@ export default function DashboardPage() {
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.12, duration: 0.35 }}
-            className="mb-4 rounded-[24px] border border-white/60 bg-white/75 p-3 shadow-xl backdrop-blur"
+            transition={{ delay: 0.08, duration: 0.35 }}
+            className="mb-4 rounded-[28px] border border-white/10 bg-white/[0.06] p-3 shadow-2xl backdrop-blur-xl"
           >
-            <div className="flex items-center gap-3 rounded-2xl bg-white/90 px-4 py-3 ring-1 ring-black/5">
-              <Search size={18} className="shrink-0 text-gray-500" />
+            <div className="flex items-center gap-3 rounded-2xl bg-black/25 px-4 py-3 ring-1 ring-white/10">
+              <Search size={18} className="shrink-0 text-white/45" />
               <input
                 type="text"
-                placeholder="Search by title, mode, partner email, category, description, or source chat"
-                className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-gray-400"
+                placeholder="Search title, person, email, category, description, or source chat"
+                className="w-full min-w-0 bg-transparent text-sm text-white outline-none placeholder:text-white/30"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
               />
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.12, duration: 0.35 }}
+            className="mb-6 overflow-x-auto pb-2"
+          >
+            <div className="flex min-w-max gap-3">
+              <button onClick={() => setView("All")} className={viewButtonClass("All")}>
+                All ({commitments.length})
+              </button>
+              <button onClick={() => setView("Solo")} className={viewButtonClass("Solo")}>
+                Solo ({commitments.filter((item) => item.mode === "solo").length})
+              </button>
+              <button
+                onClick={() => setView("My Mutual")}
+                className={viewButtonClass("My Mutual")}
+              >
+                My Mutual (
+                {
+                  commitments.filter(
+                    (item) => item.mode === "mutual" && item.createdBy === userId
+                  ).length
+                }
+                )
+              </button>
+              <button
+                onClick={() => setView("Incoming Mutual")}
+                className={viewButtonClass("Incoming Mutual")}
+              >
+                Incoming Mutual (
+                {
+                  commitments.filter(
+                    (item) => item.mode === "mutual" && item.createdBy !== userId
+                  ).length
+                }
+                )
+              </button>
             </div>
           </motion.div>
 
@@ -1673,68 +1458,26 @@ export default function DashboardPage() {
             className="mb-6 overflow-x-auto pb-2"
           >
             <div className="flex min-w-max gap-3">
-              <button
-                onClick={() => setFilter("All")}
-                className={filterButtonClass("All")}
-              >
-                <span>All</span>
+              <button onClick={() => setFilter("All")} className={filterButtonClass("All")}>
+                All
               </button>
-
-              <button
-                onClick={() => setFilter("Pending")}
-                className={filterButtonClass("Pending")}
-              >
-                <span>Pending</span>
+              <button onClick={() => setFilter("Pending")} className={filterButtonClass("Pending")}>
+                Pending
               </button>
-
-              <button
-                onClick={() => setFilter("Awaiting")}
-                className={filterButtonClass("Awaiting")}
-              >
-                <span>Awaiting</span>
-                {awaitingCount > 0 && (
-                  <span className="rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                    {awaitingCount}
-                  </span>
-                )}
+              <button onClick={() => setFilter("Awaiting")} className={filterButtonClass("Awaiting")}>
+                Awaiting
               </button>
-
-              <button
-                onClick={() => setFilter("Done")}
-                className={filterButtonClass("Done")}
-              >
-                <span>Done</span>
+              <button onClick={() => setFilter("Done")} className={filterButtonClass("Done")}>
+                Done
               </button>
-
-              <button
-                onClick={() => setFilter("Overdue")}
-                className={filterButtonClass("Overdue")}
-              >
-                <span>Overdue</span>
-                {overdueCount > 0 && (
-                  <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                    {overdueCount}
-                  </span>
-                )}
+              <button onClick={() => setFilter("Overdue")} className={filterButtonClass("Overdue")}>
+                Overdue
               </button>
-
-              <button
-                onClick={() => setFilter("Rejected")}
-                className={filterButtonClass("Rejected")}
-              >
-                <span>Rejected</span>
+              <button onClick={() => setFilter("Rejected")} className={filterButtonClass("Rejected")}>
+                Rejected
               </button>
-
-              <button
-                onClick={() => setFilter("Today")}
-                className={filterButtonClass("Today")}
-              >
-                <span>Due Today</span>
-                {todayCount > 0 && (
-                  <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                    {todayCount}
-                  </span>
-                )}
+              <button onClick={() => setFilter("Today")} className={filterButtonClass("Today")}>
+                Due Today
               </button>
             </div>
           </motion.div>
@@ -1743,19 +1486,19 @@ export default function DashboardPage() {
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-[28px] border border-dashed border-slate-300 bg-white/70 p-8 sm:p-10 text-center shadow-xl backdrop-blur"
+              className="rounded-[34px] border border-dashed border-white/15 bg-white/[0.05] p-8 text-center shadow-2xl backdrop-blur-xl sm:p-10"
             >
-              <p className="text-lg font-semibold text-slate-800">
+              <p className="text-2xl font-black text-white">
                 {emptyState.title}
               </p>
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm leading-7 text-white/45">
                 {emptyState.description}
               </p>
 
-              <div className="mt-5 flex flex-col justify-center gap-3 sm:flex-row">
+              <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
                 <Link
                   href="/commitments/new"
-                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-black px-4 py-3 text-sm font-medium text-white shadow-lg shadow-black/10"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-black shadow-lg shadow-white/10 sm:w-auto"
                 >
                   <Plus size={16} />
                   New Commitment
@@ -1767,7 +1510,7 @@ export default function DashboardPage() {
                     setFilter("All");
                     setSearchText("");
                   }}
-                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-sm"
+                  className={cardNeutralButtonClass}
                 >
                   <Info size={16} />
                   Reset view
@@ -1778,6 +1521,7 @@ export default function DashboardPage() {
             <div className="grid gap-5">
               {filteredCommitments.map((commitment, index) => {
                 const displayStatus = getDisplayStatus(commitment);
+                const statusTheme = getStatusTheme(displayStatus);
                 const isMutual = commitment.mode === "mutual";
                 const isAwaiting = displayStatus === "Awaiting";
                 const isRejected = displayStatus === "Rejected";
@@ -1794,17 +1538,6 @@ export default function DashboardPage() {
                 const creatorLabel = getCreatorLabel(commitment);
                 const partnerLabel = getPartnerLabel(commitment);
 
-                const badgeClass =
-                  displayStatus === "Done"
-                    ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
-                    : displayStatus === "Overdue"
-                    ? "bg-rose-100 text-rose-700 ring-rose-200"
-                    : displayStatus === "Awaiting"
-                    ? "bg-sky-100 text-sky-700 ring-sky-200"
-                    : displayStatus === "Rejected"
-                    ? "bg-slate-200 text-slate-700 ring-slate-300"
-                    : "bg-amber-100 text-amber-700 ring-amber-200";
-
                 const historyCount =
                   eventsByCommitment[commitment.id]?.length ?? 0;
 
@@ -1813,72 +1546,59 @@ export default function DashboardPage() {
                     key={commitment.id}
                     initial={{ opacity: 0, y: 18 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.05 * index, duration: 0.28 }}
-                    whileHover={{ y: -3 }}
-                    className={`rounded-[30px] border bg-white/80 p-5 sm:p-6 shadow-2xl backdrop-blur-xl ${
-                      isIncoming && isAwaiting
-                        ? "border-sky-200 ring-2 ring-sky-100"
-                        : "border-white/60"
-                    }`}
+                    transition={{ delay: 0.03 * index, duration: 0.28 }}
+                    className={`relative overflow-hidden rounded-[36px] border p-5 shadow-2xl backdrop-blur-2xl sm:p-6 ${statusTheme.card} ${statusTheme.glow}`}
                   >
-                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                    <div
+                      className={`absolute bottom-0 left-0 top-0 w-2 ${statusTheme.rail}`}
+                    />
+
+                    <div className="flex flex-col gap-5 pl-2 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-3">
-                          <h2 className="min-w-0 break-words text-2xl font-bold tracking-tight text-gray-900">
+                          <h2 className="min-w-0 break-words text-3xl font-black tracking-tight text-white">
                             {commitment.title}
                           </h2>
 
                           <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${badgeClass}`}
+                            className={`rounded-full px-3 py-1 text-xs font-black ${statusTheme.badge}`}
                           >
                             {displayStatus}
                           </span>
 
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ${
-                              isMutual
-                                ? "bg-indigo-100 text-indigo-700 ring-indigo-200"
-                                : "bg-slate-100 text-slate-700 ring-slate-200"
-                            }`}
-                          >
+                          <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-xs font-bold text-white/80">
                             {isMutual ? "Mutual" : "Solo"}
                           </span>
 
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ${
-                              isIncoming
-                                ? "bg-sky-100 text-sky-700 ring-sky-200"
-                                : "bg-slate-100 text-slate-700 ring-slate-200"
-                            }`}
-                          >
+                          <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-xs font-bold text-white/80">
                             {isIncoming ? "Incoming to you" : "Created by you"}
                           </span>
 
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200">
+                          <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-xs font-bold text-white/80">
                             {commitment.category}
                           </span>
 
                           {isActiveMutual && (
-                            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
+                            <span className="rounded-full bg-indigo-300 px-3 py-1 text-xs font-black text-black">
                               Accepted
                             </span>
                           )}
                         </div>
 
-                        <div className="mt-4 flex flex-wrap items-center gap-4">
-                          <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-xs font-bold text-white">
+                        <div className="mt-5 flex flex-wrap items-center gap-4">
+                          <div className="flex min-w-0 items-center gap-3 rounded-[22px] border border-white/15 bg-black/20 px-3 py-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-xs font-black text-black">
                               {getInitials(isIncoming ? creatorLabel : "You")}
                             </div>
                             <div className="min-w-0">
-                              <p className="text-xs text-slate-500">
+                              <p className="text-xs text-white/50">
                                 {isIncoming ? "Invited by" : "Creator"}
                               </p>
-                              <p className="break-words text-sm font-semibold text-slate-900">
+                              <p className="break-words text-sm font-black text-white">
                                 {isIncoming ? creatorLabel : "You"}
                               </p>
                               {isIncoming && creatorProfile?.email && (
-                                <p className="break-all text-xs text-slate-500">
+                                <p className="break-all text-xs text-white/45">
                                   {creatorProfile.email}
                                 </p>
                               )}
@@ -1886,19 +1606,19 @@ export default function DashboardPage() {
                           </div>
 
                           {isMutual && (
-                            <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-indigo-50 px-3 py-2 ring-1 ring-indigo-100">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-xs font-bold text-white">
+                            <div className="flex min-w-0 items-center gap-3 rounded-[22px] border border-indigo-300/30 bg-indigo-400/15 px-3 py-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-300 text-xs font-black text-black">
                                 {getInitials(partnerLabel)}
                               </div>
                               <div className="min-w-0">
-                                <p className="text-xs text-indigo-600">
+                                <p className="text-xs text-indigo-100/70">
                                   {isIncoming ? "Partner" : "Shared with"}
                                 </p>
-                                <p className="break-words text-sm font-semibold text-slate-900">
+                                <p className="break-words text-sm font-black text-white">
                                   {isIncoming ? "You" : partnerLabel}
                                 </p>
                                 {!isIncoming && (
-                                  <p className="break-all text-xs text-slate-500">
+                                  <p className="break-all text-xs text-white/45">
                                     {partnerProfile?.email || commitment.partnerEmail}
                                   </p>
                                 )}
@@ -1907,23 +1627,21 @@ export default function DashboardPage() {
                           )}
                         </div>
 
-                        <div className="mt-4 grid gap-3 text-sm text-slate-600 md:grid-cols-2">
-                          <p className="break-words">
-                            <span className="font-semibold text-slate-800">
+                        <div className="mt-5 grid gap-3 text-sm text-white/70 md:grid-cols-2">
+                          <p className="break-words rounded-2xl border border-white/15 bg-black/25 px-4 py-3">
+                            <span className="font-black text-white">
                               Responsible:
                             </span>{" "}
                             {commitment.responsiblePerson}
                           </p>
-                          <p className="break-words">
-                            <span className="font-semibold text-slate-800">
-                              Due:
-                            </span>{" "}
+                          <p className="break-words rounded-2xl border border-white/15 bg-black/25 px-4 py-3">
+                            <span className="font-black text-white">Due:</span>{" "}
                             {formatDate(commitment.dueDate)}
                           </p>
 
                           {isMutual && commitment.partnerEmail && (
-                            <p className="break-all md:col-span-2">
-                              <span className="font-semibold text-slate-800">
+                            <p className="break-all rounded-2xl border border-white/15 bg-black/25 px-4 py-3 md:col-span-2">
+                              <span className="font-black text-white">
                                 Partner Contact:
                               </span>{" "}
                               {partnerProfile?.email || commitment.partnerEmail}
@@ -1932,54 +1650,52 @@ export default function DashboardPage() {
                         </div>
 
                         {isMutual && !isRejected && (
-                          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                            <p className="font-semibold text-slate-800">
+                          <div className="mt-5 rounded-[24px] border border-white/15 bg-black/25 px-4 py-4 text-sm">
+                            <p className="font-black text-white">
                               Mutual completion progress
                             </p>
                             <div className="mt-3 flex flex-wrap gap-3">
                               <span
-                                className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ${
+                                className={`rounded-full px-3 py-1 text-xs font-black ${
                                   commitment.creatorDone
-                                    ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
-                                    : "bg-slate-100 text-slate-600 ring-slate-200"
+                                    ? "bg-emerald-300 text-black"
+                                    : "bg-white/10 text-white/70"
                                 }`}
                               >
-                                Creator:{" "}
-                                {commitment.creatorDone ? "Done" : "Not done"}
+                                Creator: {commitment.creatorDone ? "Done" : "Not done"}
                               </span>
                               <span
-                                className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ${
+                                className={`rounded-full px-3 py-1 text-xs font-black ${
                                   commitment.partnerDone
-                                    ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
-                                    : "bg-slate-100 text-slate-600 ring-slate-200"
+                                    ? "bg-emerald-300 text-black"
+                                    : "bg-white/10 text-white/70"
                                 }`}
                               >
-                                Partner:{" "}
-                                {commitment.partnerDone ? "Done" : "Not done"}
+                                Partner: {commitment.partnerDone ? "Done" : "Not done"}
                               </span>
                             </div>
                           </div>
                         )}
 
                         {commitment.description && (
-                          <p className="mt-4 break-words rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 ring-1 ring-slate-100">
+                          <p className="mt-5 break-words rounded-[24px] border border-white/15 bg-black/25 px-4 py-4 text-sm leading-7 text-white/72">
                             {commitment.description}
                           </p>
                         )}
 
                         {commitment.sourceText && (
-                          <div className="mt-4 rounded-2xl bg-indigo-50/70 p-4 ring-1 ring-indigo-100">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
+                          <div className="mt-5 rounded-[24px] border border-indigo-300/30 bg-indigo-400/15 p-4">
+                            <p className="text-xs font-black uppercase tracking-wide text-indigo-200">
                               Source Chat
                             </p>
-                            <p className="mt-2 break-words text-sm leading-6 text-slate-700">
+                            <p className="mt-2 break-words text-sm leading-7 text-white/70">
                               {commitment.sourceText}
                             </p>
                           </div>
                         )}
 
                         {isIncoming && isAwaiting && (
-                          <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-700">
+                          <div className="mt-5 rounded-[24px] border border-sky-300/30 bg-sky-400/15 px-4 py-3 text-sm leading-6 text-sky-100">
                             {creatorLabel} invited you to join this commitment.
                             You can accept or reject it now.
                           </div>
@@ -1993,9 +1709,7 @@ export default function DashboardPage() {
                       </div>
 
                       <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap xl:w-[340px] xl:justify-end">
-                        <motion.button
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.97 }}
+                        <button
                           onClick={() => toggleHistory(commitment.id)}
                           className={cardNeutralButtonClass}
                         >
@@ -2003,54 +1717,48 @@ export default function DashboardPage() {
                           {openHistoryIds[commitment.id]
                             ? "Hide History"
                             : `History (${historyCount})`}
-                        </motion.button>
+                        </button>
 
                         {isOwner && (
                           <>
                             {(!isMutual ||
                               commitment.status === "awaiting_acceptance" ||
                               commitment.status === "rejected") && (
-                              <motion.button
-                                whileHover={{ scale: 1.03 }}
-                                whileTap={{ scale: 0.97 }}
+                              <button
                                 onClick={() => handleEdit(commitment.id)}
                                 className={cardNeutralButtonClass}
                               >
                                 <Pencil size={16} />
                                 Edit
-                              </motion.button>
+                              </button>
                             )}
 
                             {!isMutual &&
                               displayStatus !== "Done" &&
                               displayStatus !== "Rejected" && (
                                 <>
-                                  <motion.button
-                                    whileHover={{ scale: 1.03 }}
-                                    whileTap={{ scale: 0.97 }}
+                                  <button
                                     onClick={() =>
                                       handleCopyReminder(commitment, displayStatus)
                                     }
-                                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700 shadow-sm"
+                                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-300/30 bg-sky-400/15 px-4 py-3 text-sm font-black text-sky-100 shadow-sm sm:w-auto"
                                   >
                                     <BellRing size={16} />
                                     Copy Reminder
-                                  </motion.button>
+                                  </button>
 
-                                  <motion.button
-                                    whileHover={{ scale: 1.03 }}
-                                    whileTap={{ scale: 0.97 }}
+                                  <button
                                     onClick={() => handleMarkSoloDone(commitment.id)}
-                                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-emerald-200"
+                                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-4 py-3 text-sm font-black text-black shadow-lg sm:w-auto"
                                   >
                                     <CheckCircle2 size={16} />
-                                    Mark as Done
-                                  </motion.button>
+                                    Mark Done
+                                  </button>
                                 </>
                               )}
 
                             {isMutual && isAwaiting && (
-                              <div className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-700 shadow-sm">
+                              <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-indigo-300/30 bg-indigo-400/15 px-4 py-3 text-sm font-black text-indigo-100 shadow-sm sm:w-auto">
                                 <Users size={16} />
                                 Waiting for {partnerLabel}
                               </div>
@@ -2059,38 +1767,34 @@ export default function DashboardPage() {
                             {isMutual &&
                               isActiveMutual &&
                               !commitment.creatorDone && (
-                                <motion.button
-                                  whileHover={{ scale: 1.03 }}
-                                  whileTap={{ scale: 0.97 }}
+                                <button
                                   onClick={() => handleMarkMySideDone(commitment)}
-                                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-emerald-200"
+                                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-4 py-3 text-sm font-black text-black shadow-lg sm:w-auto"
                                 >
                                   <CheckCheck size={16} />
-                                  Mark My Side Done
-                                </motion.button>
+                                  My Side Done
+                                </button>
                               )}
 
                             {isMutual &&
                               isActiveMutual &&
                               commitment.creatorDone && (
-                                <div className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-sm">
+                                <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-300/30 bg-emerald-400/15 px-4 py-3 text-sm font-black text-emerald-100 shadow-sm sm:w-auto">
                                   <CheckCheck size={16} />
                                   Your side done
                                 </div>
                               )}
 
                             {canDeleteCommitment(commitment) ? (
-                              <motion.button
-                                whileHover={{ scale: 1.03 }}
-                                whileTap={{ scale: 0.97 }}
+                              <button
                                 onClick={() => handleDeleteClick(commitment.id)}
-                                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-rose-200"
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-400 px-4 py-3 text-sm font-black text-white shadow-lg sm:w-auto"
                               >
                                 <Trash2 size={16} />
                                 Delete
-                              </motion.button>
+                              </button>
                             ) : (
-                              <div className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 shadow-sm">
+                              <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-300/30 bg-rose-400/15 px-4 py-3 text-sm font-black text-rose-100 shadow-sm sm:w-auto">
                                 <Lock size={16} />
                                 Delete locked
                               </div>
@@ -2100,25 +1804,21 @@ export default function DashboardPage() {
 
                         {!isOwner && isAwaiting && (
                           <>
-                            <motion.button
-                              whileHover={{ scale: 1.03 }}
-                              whileTap={{ scale: 0.97 }}
+                            <button
                               onClick={() => handleAcceptMutual(commitment.id)}
-                              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-emerald-200"
+                              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-4 py-3 text-sm font-black text-black shadow-lg sm:w-auto"
                             >
                               <CheckCheck size={16} />
                               Accept
-                            </motion.button>
+                            </button>
 
-                            <motion.button
-                              whileHover={{ scale: 1.03 }}
-                              whileTap={{ scale: 0.97 }}
+                            <button
                               onClick={() => handleRejectMutual(commitment.id)}
-                              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-rose-200"
+                              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-400 px-4 py-3 text-sm font-black text-white shadow-lg sm:w-auto"
                             >
                               <XCircle size={16} />
                               Reject
-                            </motion.button>
+                            </button>
                           </>
                         )}
 
@@ -2126,29 +1826,27 @@ export default function DashboardPage() {
                           !isAwaiting &&
                           !isRejected &&
                           !commitment.partnerDone && (
-                            <motion.button
-                              whileHover={{ scale: 1.03 }}
-                              whileTap={{ scale: 0.97 }}
+                            <button
                               onClick={() => handleMarkMySideDone(commitment)}
-                              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-emerald-200"
+                              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-4 py-3 text-sm font-black text-black shadow-lg sm:w-auto"
                             >
                               <CheckCheck size={16} />
-                              Mark My Side Done
-                            </motion.button>
+                              My Side Done
+                            </button>
                           )}
 
                         {!isOwner &&
                           !isAwaiting &&
                           !isRejected &&
                           commitment.partnerDone && (
-                            <div className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-sm">
+                            <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-300/30 bg-emerald-400/15 px-4 py-3 text-sm font-black text-emerald-100 shadow-sm sm:w-auto">
                               <CheckCheck size={16} />
                               Your side done
                             </div>
                           )}
 
                         {!isOwner && isRejected && (
-                          <div className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 shadow-sm">
+                          <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/[0.08] px-4 py-3 text-sm font-black text-white/70 shadow-sm sm:w-auto">
                             <XCircle size={16} />
                             Rejected
                           </div>
@@ -2162,6 +1860,56 @@ export default function DashboardPage() {
           )}
         </div>
       </motion.main>
+
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#07070a]/95 px-3 pb-3 pt-2 shadow-2xl backdrop-blur-xl sm:hidden">
+        <div className="mx-auto flex max-w-md items-center justify-between gap-2">
+          <Link
+            href="/dashboard"
+            className="flex flex-1 flex-col items-center justify-center rounded-2xl px-2 py-2 text-xs font-black text-white"
+          >
+            <CalendarDays size={20} />
+            <span className="mt-1">Home</span>
+          </Link>
+
+          <button
+            onClick={focusIncomingRequests}
+            className="relative flex flex-1 flex-col items-center justify-center rounded-2xl px-2 py-2 text-xs font-bold text-white/60"
+          >
+            <Inbox size={20} />
+            <span className="mt-1">Requests</span>
+
+            {globalAwaitingIncomingCount > 0 && (
+              <span className="absolute right-3 top-1 rounded-full bg-sky-300 px-1.5 py-0.5 text-[10px] font-black text-black">
+                {globalAwaitingIncomingCount}
+              </span>
+            )}
+          </button>
+
+          <Link
+            href="/commitments/new"
+            className="-mt-7 flex h-14 w-14 shrink-0 items-center justify-center rounded-3xl bg-white text-black shadow-xl shadow-white/10"
+            aria-label="New Commitment"
+          >
+            <Plus size={25} />
+          </Link>
+
+          <Link
+            href="/history"
+            className="flex flex-1 flex-col items-center justify-center rounded-2xl px-2 py-2 text-xs font-bold text-white/60"
+          >
+            <History size={20} />
+            <span className="mt-1">History</span>
+          </Link>
+
+          <Link
+            href="/profile"
+            className="flex flex-1 flex-col items-center justify-center rounded-2xl px-2 py-2 text-xs font-bold text-white/60"
+          >
+            <Users size={20} />
+            <span className="mt-1">Profile</span>
+          </Link>
+        </div>
+      </nav>
     </>
   );
 }

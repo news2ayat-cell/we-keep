@@ -1,42 +1,57 @@
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: {
     default: "We Keep",
     template: "%s | We Keep",
   },
   description:
-    "We Keep is a commitment tracking app for solo and mutual promises with accountability, history, and progress visibility.",
+    "We Keep turns promises into visible commitments with accountability, status tracking, reminders, and mutual confirmation.",
   applicationName: "We Keep",
-  referrer: "origin-when-cross-origin",
   keywords: [
+    "We Keep",
     "commitment tracker",
     "promise tracker",
     "accountability app",
-    "mutual commitments",
-    "shared promises",
-    "task accountability",
-    "productivity",
+    "mutual commitment",
+    "reminder app",
   ],
   authors: [{ name: "We Keep" }],
   creator: "We Keep",
   publisher: "We Keep",
-  icons: {
-    icon: "/favicon.ico",
-    shortcut: "/favicon.ico",
-    apple: "/favicon.ico",
+  metadataBase: new URL("https://we-keep.vercel.app"),
+  openGraph: {
+    title: "We Keep",
+    description:
+      "Turn promises into visible commitments with accountability and proof.",
+    url: "https://we-keep.vercel.app",
+    siteName: "We Keep",
+    type: "website",
   },
-  manifest: "/manifest.webmanifest",
+  twitter: {
+    card: "summary_large_image",
+    title: "We Keep",
+    description:
+      "Turn promises into visible commitments with accountability and proof.",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#07070a",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="bg-[#07070a] text-white antialiased">{children}</body>
     </html>
   );
 }

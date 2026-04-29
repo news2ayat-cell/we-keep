@@ -1,26 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { motion } from "framer-motion";
 import {
+  AlertTriangle,
+  ArrowLeft,
+  CalendarDays,
+  CheckCheck,
   CheckCircle2,
   Clock3,
   History,
+  Inbox,
+  Info,
+  LogOut,
+  MessageSquareText,
+  Plus,
   Search,
+  ShieldCheck,
+  Sparkles,
+  Users,
   XCircle,
 } from "lucide-react";
 import Toast from "@/components/ui/toast";
-import HistoryTimeline from "@/components/ui/history-timeline";
+
+type ToastVariant = "success" | "error" | "info";
+
+type DisplayStatus =
+  | "Pending"
+  | "Awaiting"
+  | "Done"
+  | "Overdue"
+  | "Rejected";
 
 type Commitment = {
   id: number;
   title: string;
   description: string;
-  sourceText?: string;
+  sourceText: string;
   responsiblePerson: string;
-  partnerEmail?: string;
+  partnerEmail: string;
   dueDate: string;
   category: string;
   status: string;
@@ -68,46 +88,19 @@ type EventRow = {
   created_at: string | null;
 };
 
-type ProfileRow = {
-  id: string | null;
-  email: string | null;
-  full_name: string | null;
-  avatar_url: string | null;
+type GroupedHistory = {
+  commitment: Commitment;
+  events: CommitmentEvent[];
 };
-
-type SimpleProfile = {
-  id: string;
-  email: string;
-  fullName: string;
-  avatarUrl: string;
-};
-
-type HistoryTab = "All History" | "Completed" | "Incomplete" | "Rejected";
-type DisplayStatus = "Pending" | "Awaiting" | "Done" | "Overdue" | "Rejected";
-type ToastVariant = "success" | "error" | "info";
 
 export default function HistoryPage() {
   const [mounted, setMounted] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userEmail, setUserEmail] = useState("");
   const [userId, setUserId] = useState("");
+  const [userEmail, setUserEmail] = useState("");
 
   const [commitments, setCommitments] = useState<Commitment[]>([]);
-  const [eventsByCommitment, setEventsByCommitment] = useState<
-    Record<number, CommitmentEvent[]>
-  >({});
-  const [openHistoryIds, setOpenHistoryIds] = useState<Record<number, boolean>>(
-    {}
-  );
-
-  const [profilesById, setProfilesById] = useState<Record<string, SimpleProfile>>(
-    {}
-  );
-  const [profilesByEmail, setProfilesByEmail] = useState<
-    Record<string, SimpleProfile>
-  >({});
-
-  const [tab, setTab] = useState<HistoryTab>("All History");
+  const [events, setEvents] = useState<CommitmentEvent[]>([]);
   const [searchText, setSearchText] = useState("");
 
   const [toastOpen, setToastOpen] = useState(false);
@@ -155,161 +148,105 @@ export default function HistoryPage() {
     createdAt: item.created_at ?? "",
   });
 
-  const mapProfileRow = (item: ProfileRow): SimpleProfile => ({
-    id: item.id ?? "",
-    email: normalizeEmail(item.email ?? ""),
-    fullName: item.full_name ?? "",
-    avatarUrl: item.avatar_url ?? "",
-  });
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
 
-  const getDisplayName = (profile?: SimpleProfile | null) => {
-    if (!profile) return "";
-    const name = profile.fullName.trim();
-    return name || profile.email;
-  };
-
-  const getInitials = (label: string) => {
-    const cleaned = label.trim();
-    if (!cleaned) return "?";
-
-    const parts = cleaned.split(/\s+/).filter(Boolean);
-
-    if (parts.length === 1) {
-      return parts[0].slice(0, 2).toUpperCase();
+    if (isNaN(date.getTime())) {
+      return dateString || "Unknown date";
     }
 
-    return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+    return date.toLocaleString();
   };
 
-  const getCreatorProfile = (commitment: Commitment) =>
-    profilesById[commitment.createdBy] ?? null;
-
-  const getPartnerProfile = (commitment: Commitment) => {
-    const email = normalizeEmail(commitment.partnerEmail ?? "");
-    return email ? profilesByEmail[email] ?? null : null;
-  };
-
-  const getCreatorLabel = (commitment: Commitment) => {
-    const creatorProfile = getCreatorProfile(commitment);
-    if (creatorProfile) return getDisplayName(creatorProfile);
-    return commitment.createdBy === userId ? "You" : "Unknown creator";
-  };
-
-  const getPartnerLabel = (commitment: Commitment) => {
-    const partnerProfile = getPartnerProfile(commitment);
-    if (partnerProfile) return getDisplayName(partnerProfile);
-    return commitment.partnerEmail || "Unknown partner";
-  };
-
-  const loadProfiles = async (
-    commitmentList: Commitment[],
-    currentUserEmail: string
-  ) => {
-    const idMap: Record<string, SimpleProfile> = {};
-    const emailMap: Record<string, SimpleProfile> = {};
-
-    const creatorIds = Array.from(
-      new Set(
-        commitmentList
-          .map((item) => item.createdBy)
-          .filter((value) => value && value.trim())
-      )
-    );
-
-    const partnerEmails = Array.from(
-      new Set(
-        [currentUserEmail, ...commitmentList.map((item) => item.partnerEmail ?? "")]
-          .map((value) => normalizeEmail(value))
-          .filter(Boolean)
-      )
-    );
-
-    if (creatorIds.length > 0) {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, email, full_name, avatar_url")
-        .in("id", creatorIds);
-
-      if (error) {
-        showToast(
-          "Profile load failed",
-          `${error.message}${error.code ? ` (${error.code})` : ""}`,
-          "error"
-        );
-      } else {
-        (data ?? []).forEach((row) => {
-          const mapped = mapProfileRow(row as ProfileRow);
-          if (mapped.id) idMap[mapped.id] = mapped;
-          if (mapped.email) emailMap[mapped.email] = mapped;
-        });
-      }
+  const getDisplayStatus = (commitment: Commitment): DisplayStatus => {
+    if (
+      commitment.mode === "mutual" &&
+      commitment.creatorDone &&
+      commitment.partnerDone
+    ) {
+      return "Done";
     }
 
-    if (partnerEmails.length > 0) {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, email, full_name, avatar_url")
-        .in("email", partnerEmails);
+    if (commitment.status === "done") return "Done";
+    if (commitment.status === "rejected") return "Rejected";
+    if (commitment.status === "awaiting_acceptance") return "Awaiting";
 
-      if (error) {
-        showToast(
-          "Partner profile load failed",
-          `${error.message}${error.code ? ` (${error.code})` : ""}`,
-          "error"
-        );
-      } else {
-        (data ?? []).forEach((row) => {
-          const mapped = mapProfileRow(row as ProfileRow);
-          if (mapped.id) idMap[mapped.id] = mapped;
-          if (mapped.email) emailMap[mapped.email] = mapped;
-        });
-      }
+    const dueDate = new Date(commitment.dueDate);
+    const now = new Date();
+
+    if (!isNaN(dueDate.getTime()) && dueDate < now) {
+      return "Overdue";
     }
 
-    setProfilesById(idMap);
-    setProfilesByEmail(emailMap);
+    return "Pending";
   };
 
-  const loadEvents = async (commitmentIds: number[]) => {
-    if (commitmentIds.length === 0) {
-      setEventsByCommitment({});
-      return;
+  const getStatusTheme = (displayStatus: DisplayStatus) => {
+    if (displayStatus === "Done") {
+      return {
+        badge: "bg-emerald-300 text-emerald-950",
+        card: "border-emerald-300/70 bg-[#042a22]",
+        rail: "bg-emerald-300",
+        icon: CheckCircle2,
+      };
     }
 
-    const { data, error } = await supabase
-      .from("commitment_events")
-      .select("*")
-      .in("commitment_id", commitmentIds)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      showToast(
-        "History load failed",
-        `${error.message}${error.code ? ` (${error.code})` : ""}`,
-        "error"
-      );
-      return;
+    if (displayStatus === "Overdue") {
+      return {
+        badge: "bg-rose-400 text-white",
+        card: "border-rose-300/75 bg-[#3a0712]",
+        rail: "bg-rose-400",
+        icon: AlertTriangle,
+      };
     }
 
-    const grouped: Record<number, CommitmentEvent[]> = {};
+    if (displayStatus === "Awaiting") {
+      return {
+        badge: "bg-sky-300 text-sky-950",
+        card: "border-sky-300/75 bg-[#06283f]",
+        rail: "bg-sky-300",
+        icon: Inbox,
+      };
+    }
 
-    (data ?? []).forEach((row) => {
-      const mapped = mapRowToEvent(row as EventRow);
+    if (displayStatus === "Rejected") {
+      return {
+        badge: "bg-slate-400 text-slate-950",
+        card: "border-slate-400/60 bg-[#1f2937]",
+        rail: "bg-slate-400",
+        icon: XCircle,
+      };
+    }
 
-      if (!grouped[mapped.commitmentId]) {
-        grouped[mapped.commitmentId] = [];
-      }
-
-      grouped[mapped.commitmentId].push(mapped);
-    });
-
-    setEventsByCommitment(grouped);
+    return {
+      badge: "bg-amber-300 text-amber-950",
+      card: "border-amber-300/75 bg-[#352407]",
+      rail: "bg-amber-300",
+      icon: Clock3,
+    };
   };
 
-  const loadCommitments = async (
-    currentUserId: string,
-    currentUserEmail: string
-  ) => {
+  const getEventIcon = (eventType: string) => {
+    if (
+      eventType.includes("done") ||
+      eventType.includes("completed") ||
+      eventType.includes("accepted")
+    ) {
+      return CheckCheck;
+    }
+
+    if (eventType.includes("rejected")) {
+      return XCircle;
+    }
+
+    if (eventType.includes("created")) {
+      return Plus;
+    }
+
+    return History;
+  };
+
+  const loadHistory = async (currentUserId: string, currentUserEmail: string) => {
     const normalizedEmail = normalizeEmail(currentUserEmail);
 
     const [ownedResponse, incomingResponse] = await Promise.all([
@@ -365,151 +302,173 @@ export default function HistoryPage() {
 
     setCommitments(finalCommitments);
 
-    await Promise.all([
-      loadProfiles(finalCommitments, currentUserEmail),
-      loadEvents(finalCommitments.map((item) => item.id)),
-    ]);
+    const commitmentIds = finalCommitments.map((item) => item.id);
+
+    if (commitmentIds.length === 0) {
+      setEvents([]);
+      return;
+    }
+
+    const { data: eventData, error: eventError } = await supabase
+      .from("commitment_events")
+      .select("*")
+      .in("commitment_id", commitmentIds)
+      .order("created_at", { ascending: false });
+
+    if (eventError) {
+      showToast(
+        "Activity load failed",
+        `${eventError.message}${eventError.code ? ` (${eventError.code})` : ""}`,
+        "error"
+      );
+      return;
+    }
+
+    setEvents((eventData ?? []).map((item) => mapRowToEvent(item as EventRow)));
   };
 
   useEffect(() => {
     const loadPage = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
 
-      if (!user?.email) {
+        if (error) {
+          await supabase.auth.signOut();
+          setIsLoggedIn(false);
+          setMounted(true);
+          return;
+        }
+
+        if (!user?.email) {
+          setIsLoggedIn(false);
+          setMounted(true);
+          return;
+        }
+
+        setIsLoggedIn(true);
+        setUserId(user.id);
+        setUserEmail(user.email);
+
+        await loadHistory(user.id, user.email);
+        setMounted(true);
+      } catch (error) {
+        console.error("History load failed:", error);
+        await supabase.auth.signOut();
         setIsLoggedIn(false);
         setMounted(true);
-        return;
       }
-
-      setIsLoggedIn(true);
-      setUserEmail(user.email);
-      setUserId(user.id);
-
-      await loadCommitments(user.id, user.email);
-      setMounted(true);
     };
 
     loadPage();
   }, []);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    showToast("Signed out", "You have been logged out.", "success");
 
-    if (isNaN(date.getTime())) return dateString;
-
-    return date.toLocaleString();
+    setTimeout(() => {
+      window.location.href = "/login";
+    }, 700);
   };
 
-  const getDisplayStatus = (commitment: Commitment): DisplayStatus => {
-    if (commitment.status === "done") return "Done";
-    if (commitment.status === "rejected") return "Rejected";
-    if (commitment.status === "awaiting_acceptance") return "Awaiting";
+  const groupedHistory = useMemo<GroupedHistory[]>(() => {
+    const eventMap: Record<number, CommitmentEvent[]> = {};
 
-    const dueDate = new Date(commitment.dueDate);
-    const now = new Date();
+    events.forEach((event) => {
+      if (!eventMap[event.commitmentId]) {
+        eventMap[event.commitmentId] = [];
+      }
 
-    if (!isNaN(dueDate.getTime()) && dueDate < now) {
-      return "Overdue";
-    }
+      eventMap[event.commitmentId].push(event);
+    });
 
-    return "Pending";
-  };
-
-  const getCompletedAt = (commitmentId: number) => {
-    const events = eventsByCommitment[commitmentId] ?? [];
-
-    const completedEvent = events.find(
-      (event) =>
-        event.eventType === "completed" || event.eventType === "solo_done"
-    );
-
-    return completedEvent?.createdAt ?? "";
-  };
-
-  const toggleHistory = (id: number) => {
-    setOpenHistoryIds((prev) => ({
-      ...prev,
-      [id]: !prev[id],
+    return commitments.map((commitment) => ({
+      commitment,
+      events: eventMap[commitment.id] ?? [],
     }));
-  };
+  }, [commitments, events]);
 
-  const tabbedCommitments = commitments.filter((commitment) => {
-    const displayStatus = getDisplayStatus(commitment);
+  const filteredHistory = groupedHistory.filter(({ commitment, events }) => {
+    const search = searchText.trim().toLowerCase();
 
-    if (tab === "All History") return true;
-    if (tab === "Completed") return displayStatus === "Done";
-    if (tab === "Rejected") return displayStatus === "Rejected";
-    if (tab === "Incomplete") {
-      return displayStatus !== "Done" && displayStatus !== "Rejected";
-    }
-
-    return true;
-  });
-
-  const filteredCommitments = tabbedCommitments.filter((commitment) => {
-    const search = searchText.toLowerCase();
+    if (!search) return true;
 
     return (
       commitment.title.toLowerCase().includes(search) ||
+      commitment.description.toLowerCase().includes(search) ||
+      commitment.sourceText.toLowerCase().includes(search) ||
       commitment.responsiblePerson.toLowerCase().includes(search) ||
+      commitment.partnerEmail.toLowerCase().includes(search) ||
       commitment.category.toLowerCase().includes(search) ||
       commitment.mode.toLowerCase().includes(search) ||
-      commitment.description.toLowerCase().includes(search) ||
-      (commitment.partnerEmail || "").toLowerCase().includes(search) ||
-      (commitment.sourceText || "").toLowerCase().includes(search)
+      events.some(
+        (event) =>
+          event.eventLabel.toLowerCase().includes(search) ||
+          event.details.toLowerCase().includes(search) ||
+          event.actorEmail.toLowerCase().includes(search)
+      )
     );
   });
 
-  const completedCount = commitments.filter(
+  const doneCount = commitments.filter(
     (item) => getDisplayStatus(item) === "Done"
   ).length;
-
-  const incompleteCount = commitments.filter((item) => {
-    const status = getDisplayStatus(item);
-    return status !== "Done" && status !== "Rejected";
-  }).length;
-
-  const rejectedCount = commitments.filter(
-    (item) => getDisplayStatus(item) === "Rejected"
+  const pendingCount = commitments.filter(
+    (item) => getDisplayStatus(item) === "Pending"
   ).length;
-
-  const tabButtonClass = (name: HistoryTab) =>
-    `inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
-      tab === name
-        ? "bg-black text-white shadow-lg"
-        : "bg-white/80 text-slate-700 ring-1 ring-black/5 hover:bg-white"
-    }`;
+  const awaitingCount = commitments.filter(
+    (item) => getDisplayStatus(item) === "Awaiting"
+  ).length;
+  const overdueCount = commitments.filter(
+    (item) => getDisplayStatus(item) === "Overdue"
+  ).length;
+  const mutualCount = commitments.filter((item) => item.mode === "mutual").length;
 
   if (!mounted) {
     return (
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mx-auto max-w-6xl">
-          <p className="text-sm text-slate-600">Loading history...</p>
+      <main className="flex min-h-screen items-center justify-center overflow-hidden bg-[#07070a] px-4 text-white">
+        <div className="relative rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-black">
+              <History size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-black">Loading history</p>
+              <p className="mt-1 text-xs text-white/45">
+                Reading activity timeline...
+              </p>
+            </div>
+          </div>
         </div>
       </main>
     );
   }
-
-  if (!isLoggedIn) {
+    if (!isLoggedIn) {
     return (
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mx-auto max-w-2xl rounded-[28px] border border-white/60 bg-white/80 p-6 sm:p-8 shadow-2xl backdrop-blur">
-          <Link href="/" className="text-sm text-slate-600 hover:underline">
-            ← Back to Home
+      <main className="min-h-screen overflow-hidden bg-[#07070a] px-4 py-6 text-white sm:px-6 sm:py-8">
+        <div className="relative mx-auto max-w-2xl rounded-[34px] border border-white/10 bg-white/[0.06] p-6 shadow-2xl backdrop-blur-xl sm:p-8">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-white/60 hover:text-white"
+          >
+            <ArrowLeft size={16} />
+            Back to Home
           </Link>
 
-          <h1 className="mt-4 text-3xl font-bold text-slate-900">
+          <h1 className="mt-5 text-4xl font-black tracking-tight text-white">
             You are not logged in
           </h1>
-          <p className="mt-2 text-slate-600">
-            Please sign in with Google first.
+
+          <p className="mt-3 text-sm leading-7 text-white/55">
+            Please sign in with Google first to view your history.
           </p>
 
           <Link
             href="/login"
-            className="mt-6 inline-flex rounded-xl bg-black px-5 py-3 text-white"
+            className="mt-6 inline-flex rounded-2xl bg-white px-5 py-3 text-sm font-black text-black shadow-xl shadow-white/10 transition hover:scale-[1.02]"
           >
             Go to Login
           </Link>
@@ -531,75 +490,135 @@ export default function HistoryPage() {
       <motion.main
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#eef2ff_35%,_#f8fafc_70%)] px-4 py-6 sm:px-6 sm:py-8"
+        transition={{ duration: 0.45 }}
+        className="min-h-screen overflow-hidden bg-[#07070a] px-4 pb-28 pt-5 text-white sm:px-6 sm:py-8"
       >
-        <div className="mx-auto max-w-6xl">
-          <motion.div
+        <div className="pointer-events-none fixed inset-0">
+          <div className="absolute left-1/2 top-[-18rem] h-[42rem] w-[42rem] -translate-x-1/2 rounded-full bg-indigo-600/25 blur-3xl" />
+          <div className="absolute right-[-12rem] top-[18rem] h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/15 blur-3xl" />
+          <div className="absolute bottom-[-16rem] left-[-10rem] h-[34rem] w-[34rem] rounded-full bg-cyan-400/10 blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto max-w-7xl">
+          <motion.nav
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+            className="mb-6 flex items-center justify-between rounded-[28px] border border-white/10 bg-white/[0.04] px-4 py-4 shadow-2xl backdrop-blur-xl sm:px-6"
+          >
+            <Link href="/" className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-black shadow-lg">
+                <Sparkles size={20} />
+              </div>
+
+              <div>
+                <p className="text-lg font-black tracking-tight">We Keep</p>
+                <p className="hidden text-xs text-white/45 sm:block">
+                  Activity history
+                </p>
+              </div>
+            </Link>
+
+            <div className="flex items-center gap-2">
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-bold text-white/80 transition hover:bg-white/10 sm:px-5"
+              >
+                <CalendarDays size={17} />
+                <span className="hidden sm:inline">Dashboard</span>
+              </Link>
+
+              <button
+                onClick={handleSignOut}
+                className="hidden items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-black shadow-xl shadow-white/10 transition hover:scale-[1.02] sm:inline-flex"
+              >
+                <LogOut size={17} />
+                Sign out
+              </button>
+            </div>
+          </motion.nav>
+
+          <motion.section
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-6 rounded-[30px] border border-white/60 bg-white/80 p-5 sm:p-6 shadow-2xl backdrop-blur-xl"
+            transition={{ duration: 0.35 }}
+            className="mb-6 overflow-hidden rounded-[38px] border border-white/10 bg-white/[0.06] p-5 shadow-2xl backdrop-blur-2xl sm:p-7 lg:p-8"
           >
-            <div className="flex flex-col gap-4">
+            <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
               <div>
-                <Link
-                  href="/dashboard"
-                  className="text-sm text-slate-600 hover:underline"
-                >
-                  ← Back to Dashboard
-                </Link>
+                <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-indigo-200">
+                  <ShieldCheck size={15} />
+                  Timeline and proof
+                </div>
 
-                <h1 className="mt-3 break-words text-4xl font-black tracking-tight text-slate-900 sm:text-5xl">
-                  Commitment History
+                <h1 className="mt-6 max-w-4xl text-5xl font-black leading-[0.95] tracking-[-0.06em] sm:text-6xl lg:text-7xl">
+                  See what happened to your promises.
                 </h1>
 
-                <p className="mt-2 break-all text-sm text-slate-600">
-                  Review past and current commitment records for {userEmail}
+                <p className="mt-5 max-w-2xl text-sm leading-7 text-white/58 sm:text-base">
+                  Signed in as {userEmail}. This page shows created, accepted,
+                  rejected, completed, and side-done activity for your visible
+                  commitments.
                 </p>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
+                <Link
+                  href="/commitments/new"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 text-sm font-black text-black shadow-2xl shadow-white/10 transition hover:scale-[1.02] sm:w-auto lg:w-full"
+                >
+                  <Plus size={18} />
+                  New Commitment
+                </Link>
+
                 <Link
                   href="/dashboard"
-                  className="inline-flex w-full sm:w-auto items-center justify-center rounded-2xl border border-black/10 bg-white px-5 py-3 text-sm font-medium text-slate-800 shadow-sm"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-4 text-sm font-black text-white/85 shadow-xl backdrop-blur transition hover:bg-white/10 sm:w-auto lg:w-full"
                 >
+                  <CalendarDays size={18} />
                   Dashboard
-                </Link>
-                <Link
-                  href="/profile"
-                  className="inline-flex w-full sm:w-auto items-center justify-center rounded-2xl border border-black/10 bg-white px-5 py-3 text-sm font-medium text-slate-800 shadow-sm"
-                >
-                  Profile
                 </Link>
               </div>
             </div>
-          </motion.div>
+          </motion.section>
 
-          <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
             {[
               {
-                label: "All History",
+                label: "Commitments",
                 value: commitments.length,
+                icon: CalendarDays,
+                card: "border-white/15 bg-white/[0.06]",
+              },
+              {
+                label: "Events",
+                value: events.length,
                 icon: History,
-                color: "from-slate-900 to-slate-700 text-white",
+                card: "border-indigo-300/60 bg-[#19173d]",
               },
               {
-                label: "Completed",
-                value: completedCount,
-                icon: CheckCircle2,
-                color: "from-emerald-500 to-green-600 text-white",
-              },
-              {
-                label: "Incomplete",
-                value: incompleteCount,
+                label: "Pending",
+                value: pendingCount,
                 icon: Clock3,
-                color: "from-amber-400 to-yellow-500 text-slate-900",
+                card: "border-amber-300/70 bg-[#352407]",
               },
               {
-                label: "Rejected",
-                value: rejectedCount,
-                icon: XCircle,
-                color: "from-rose-500 to-red-600 text-white",
+                label: "Awaiting",
+                value: awaitingCount,
+                icon: Inbox,
+                card: "border-sky-300/70 bg-[#06283f]",
+              },
+              {
+                label: "Done",
+                value: doneCount,
+                icon: CheckCircle2,
+                card: "border-emerald-300/70 bg-[#042a22]",
+              },
+              {
+                label: "Mutual",
+                value: mutualCount,
+                icon: Users,
+                card: "border-cyan-300/70 bg-[#073342]",
               },
             ].map((item, index) => {
               const Icon = item.icon;
@@ -607,15 +626,20 @@ export default function HistoryPage() {
               return (
                 <motion.div
                   key={item.label}
-                  initial={{ opacity: 0, y: 14 }}
+                  initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05, duration: 0.25 }}
-                  className={`rounded-[28px] bg-gradient-to-br ${item.color} p-5 shadow-xl`}
+                  transition={{ delay: 0.04 * index, duration: 0.35 }}
+                  className={`rounded-[30px] border p-5 shadow-2xl backdrop-blur-xl ${item.card}`}
                 >
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium opacity-90">{item.label}</p>
-                    <Icon size={22} className="opacity-90" />
+                    <p className="text-sm font-bold text-white/70">
+                      {item.label}
+                    </p>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-black">
+                      <Icon size={18} />
+                    </div>
                   </div>
+
                   <p className="mt-5 text-4xl font-black tracking-tight">
                     {item.value}
                   </p>
@@ -625,215 +649,256 @@ export default function HistoryPage() {
           </div>
 
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-4 overflow-x-auto pb-2"
+            transition={{ delay: 0.08, duration: 0.35 }}
+            className="mb-6 rounded-[28px] border border-white/10 bg-white/[0.06] p-3 shadow-2xl backdrop-blur-xl"
           >
-            <div className="flex min-w-max gap-3">
-              <button
-                onClick={() => setTab("All History")}
-                className={tabButtonClass("All History")}
-              >
-                All History
-              </button>
-              <button
-                onClick={() => setTab("Completed")}
-                className={tabButtonClass("Completed")}
-              >
-                Completed
-              </button>
-              <button
-                onClick={() => setTab("Incomplete")}
-                className={tabButtonClass("Incomplete")}
-              >
-                Incomplete
-              </button>
-              <button
-                onClick={() => setTab("Rejected")}
-                className={tabButtonClass("Rejected")}
-              >
-                Rejected
-              </button>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6 rounded-[24px] border border-white/60 bg-white/75 p-3 shadow-xl backdrop-blur"
-          >
-            <div className="flex items-center gap-3 rounded-2xl bg-white/90 px-4 py-3 ring-1 ring-black/5">
-              <Search size={18} className="shrink-0 text-slate-500" />
+            <div className="flex items-center gap-3 rounded-2xl bg-black/25 px-4 py-3 ring-1 ring-white/10">
+              <Search size={18} className="shrink-0 text-white/45" />
               <input
                 type="text"
-                placeholder="Search by title, mode, partner, category, description, or source chat"
-                className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                placeholder="Search title, person, email, event, category, or source chat"
+                className="w-full min-w-0 bg-transparent text-sm text-white outline-none placeholder:text-white/30"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
               />
             </div>
           </motion.div>
 
-          {filteredCommitments.length === 0 ? (
+          {filteredHistory.length === 0 ? (
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-[28px] border border-dashed border-slate-300 bg-white/70 p-8 sm:p-10 text-center shadow-xl backdrop-blur"
+              className="rounded-[34px] border border-dashed border-white/15 bg-white/[0.05] p-8 text-center shadow-2xl backdrop-blur-xl sm:p-10"
             >
-              <p className="text-lg font-semibold text-slate-800">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-black">
+                <Info size={22} />
+              </div>
+
+              <p className="mt-5 text-2xl font-black text-white">
                 No history found
               </p>
-              <p className="mt-2 text-sm text-slate-500">
-                Try another history tab or clear the search text.
+
+              <p className="mx-auto mt-2 max-w-xl text-sm leading-7 text-white/45">
+                Create a commitment, accept a request, reject one, or mark
+                something done. Activity will appear here.
               </p>
+
+              <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+                <Link
+                  href="/commitments/new"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-black shadow-lg shadow-white/10 sm:w-auto"
+                >
+                  <Plus size={16} />
+                  New Commitment
+                </Link>
+
+                <Link
+                  href="/dashboard"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white/85 shadow-sm transition hover:bg-white/10 sm:w-auto"
+                >
+                  <CalendarDays size={16} />
+                  Dashboard
+                </Link>
+              </div>
             </motion.div>
           ) : (
             <div className="grid gap-5">
-              {filteredCommitments.map((commitment, index) => {
+              {filteredHistory.map(({ commitment, events }, index) => {
                 const displayStatus = getDisplayStatus(commitment);
-                const isMutual = commitment.mode === "mutual";
-                const creatorLabel = getCreatorLabel(commitment);
-                const partnerLabel = getPartnerLabel(commitment);
-                const completedAt = getCompletedAt(commitment.id);
-                const historyCount =
-                  eventsByCommitment[commitment.id]?.length ?? 0;
-
-                const badgeClass =
-                  displayStatus === "Done"
-                    ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
-                    : displayStatus === "Overdue"
-                    ? "bg-rose-100 text-rose-700 ring-rose-200"
-                    : displayStatus === "Awaiting"
-                    ? "bg-sky-100 text-sky-700 ring-sky-200"
-                    : displayStatus === "Rejected"
-                    ? "bg-slate-200 text-slate-700 ring-slate-300"
-                    : "bg-amber-100 text-amber-700 ring-amber-200";
+                const statusTheme = getStatusTheme(displayStatus);
+                const StatusIcon = statusTheme.icon;
 
                 return (
-                  <motion.div
+                  <motion.section
                     key={commitment.id}
-                    initial={{ opacity: 0, y: 12 }}
+                    initial={{ opacity: 0, y: 18 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.04, duration: 0.22 }}
-                    className="rounded-[30px] border border-white/60 bg-white/80 p-5 sm:p-6 shadow-2xl backdrop-blur-xl"
+                    transition={{ delay: 0.03 * index, duration: 0.28 }}
+                    className={`relative overflow-hidden rounded-[36px] border p-5 shadow-2xl backdrop-blur-2xl sm:p-6 ${statusTheme.card}`}
                   >
-                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <h2 className="break-words text-2xl font-bold tracking-tight text-slate-900">
-                            {commitment.title}
-                          </h2>
+                    <div
+                      className={`absolute bottom-0 left-0 top-0 w-2 ${statusTheme.rail}`}
+                    />
 
+                    <div className="grid gap-6 pl-2 lg:grid-cols-[0.85fr_1.15fr]">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-3">
                           <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${badgeClass}`}
+                            className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black ${statusTheme.badge}`}
                           >
+                            <StatusIcon size={14} />
                             {displayStatus}
                           </span>
 
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ${
-                              isMutual
-                                ? "bg-indigo-100 text-indigo-700 ring-indigo-200"
-                                : "bg-slate-100 text-slate-700 ring-slate-200"
-                            }`}
-                          >
-                            {isMutual ? "Mutual" : "Solo"}
+                          <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-xs font-bold text-white/80">
+                            {commitment.mode === "mutual" ? "Mutual" : "Solo"}
                           </span>
 
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200">
+                          <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-xs font-bold text-white/80">
                             {commitment.category}
                           </span>
                         </div>
 
-                        <div className="mt-4 flex flex-wrap items-center gap-4">
-                          <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-xs font-bold text-white">
-                              {getInitials(creatorLabel)}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs text-slate-500">Creator</p>
-                              <p className="break-words text-sm font-semibold text-slate-900">
-                                {creatorLabel}
-                              </p>
-                            </div>
-                          </div>
+                        <h2 className="mt-4 break-words text-3xl font-black tracking-tight text-white">
+                          {commitment.title}
+                        </h2>
 
-                          {isMutual && (
-                            <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-indigo-50 px-3 py-2 ring-1 ring-indigo-100">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-xs font-bold text-white">
-                                {getInitials(partnerLabel)}
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-xs text-indigo-600">Partner</p>
-                                <p className="break-words text-sm font-semibold text-slate-900">
-                                  {partnerLabel}
-                                </p>
-                              </div>
-                            </div>
+                        <div className="mt-5 grid gap-3 text-sm text-white/70">
+                          <p className="break-words rounded-2xl border border-white/15 bg-black/25 px-4 py-3">
+                            <span className="font-black text-white">
+                              Responsible:
+                            </span>{" "}
+                            {commitment.responsiblePerson || "Unknown"}
+                          </p>
+
+                          <p className="break-words rounded-2xl border border-white/15 bg-black/25 px-4 py-3">
+                            <span className="font-black text-white">Due:</span>{" "}
+                            {formatDate(commitment.dueDate)}
+                          </p>
+
+                          {commitment.partnerEmail && (
+                            <p className="break-all rounded-2xl border border-white/15 bg-black/25 px-4 py-3">
+                              <span className="font-black text-white">
+                                Partner:
+                              </span>{" "}
+                              {commitment.partnerEmail}
+                            </p>
                           )}
                         </div>
 
-                        <div className="mt-4 grid gap-3 text-sm text-slate-600 md:grid-cols-2">
-                          <p className="break-words">
-                            <span className="font-semibold text-slate-800">
-                              Responsible:
-                            </span>{" "}
-                            {commitment.responsiblePerson}
-                          </p>
-                          <p className="break-words">
-                            <span className="font-semibold text-slate-800">
-                              Due:
-                            </span>{" "}
-                            {formatDate(commitment.dueDate)}
-                          </p>
-                          <p className="break-words">
-                            <span className="font-semibold text-slate-800">
-                              Created:
-                            </span>{" "}
-                            {formatDate(commitment.createdAt)}
-                          </p>
-                          <p className="break-words">
-                            <span className="font-semibold text-slate-800">
-                              Completed:
-                            </span>{" "}
-                            {completedAt ? formatDate(completedAt) : "Not completed"}
-                          </p>
-                        </div>
-
                         {commitment.description && (
-                          <p className="mt-4 break-words rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 ring-1 ring-slate-100">
+                          <p className="mt-5 break-words rounded-[24px] border border-white/15 bg-black/25 px-4 py-4 text-sm leading-7 text-white/72">
                             {commitment.description}
                           </p>
                         )}
 
-                        {openHistoryIds[commitment.id] && (
-                          <HistoryTimeline
-                            events={eventsByCommitment[commitment.id] ?? []}
-                          />
+                        {commitment.sourceText && (
+                          <div className="mt-5 rounded-[24px] border border-indigo-300/30 bg-indigo-400/15 p-4">
+                            <p className="text-xs font-black uppercase tracking-wide text-indigo-200">
+                              Source Chat
+                            </p>
+                            <p className="mt-2 break-words text-sm leading-7 text-white/70">
+                              {commitment.sourceText}
+                            </p>
+                          </div>
                         )}
                       </div>
 
-                      <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap xl:w-[260px] xl:justify-end">
-                        <motion.button
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.97 }}
-                          onClick={() => toggleHistory(commitment.id)}
-                          className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-sm"
-                        >
-                          <History size={16} />
-                          {openHistoryIds[commitment.id]
-                            ? "Hide Timeline"
-                            : `Timeline (${historyCount})`}
-                        </motion.button>
+                      <div className="rounded-[30px] border border-white/10 bg-black/20 p-4 sm:p-5">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-lg font-black text-white">
+                              Activity timeline
+                            </p>
+                            <p className="mt-1 text-xs text-white/45">
+                              {events.length} event{events.length === 1 ? "" : "s"}
+                            </p>
+                          </div>
+
+                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-black">
+                            <History size={18} />
+                          </div>
+                        </div>
+
+                        {events.length === 0 ? (
+                          <div className="mt-5 rounded-[24px] border border-dashed border-white/15 bg-white/[0.04] p-5">
+                            <p className="text-sm font-black text-white">
+                              No activity events yet
+                            </p>
+                            <p className="mt-2 text-sm leading-6 text-white/45">
+                              When this commitment changes, events will appear
+                              here.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="mt-5 space-y-4">
+                            {events.map((event) => {
+                              const EventIcon = getEventIcon(event.eventType);
+
+                              return (
+                                <div
+                                  key={event.id}
+                                  className="relative rounded-[24px] border border-white/10 bg-white/[0.06] p-4"
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-black">
+                                      <EventIcon size={17} />
+                                    </div>
+
+                                    <div className="min-w-0">
+                                      <p className="break-words text-sm font-black text-white">
+                                        {event.eventLabel}
+                                      </p>
+
+                                      <p className="mt-1 break-words text-sm leading-6 text-white/58">
+                                        {event.details || "No details."}
+                                      </p>
+
+                                      <div className="mt-3 flex flex-wrap gap-2">
+                                        <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs font-bold text-white/50">
+                                          {formatDate(event.createdAt)}
+                                        </span>
+
+                                        {event.actorEmail && (
+                                          <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs font-bold text-white/50">
+                                            {event.actorEmail}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </motion.div>
+                  </motion.section>
                 );
               })}
             </div>
           )}
         </div>
       </motion.main>
+
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#07070a]/95 px-3 pb-3 pt-2 shadow-2xl backdrop-blur-xl sm:hidden">
+        <div className="mx-auto flex max-w-md items-center justify-between gap-2">
+          <Link
+            href="/dashboard"
+            className="flex flex-1 flex-col items-center justify-center rounded-2xl px-2 py-2 text-xs font-bold text-white/60"
+          >
+            <CalendarDays size={20} />
+            <span className="mt-1">Home</span>
+          </Link>
+
+          <Link
+            href="/commitments/new"
+            className="-mt-7 flex h-14 w-14 shrink-0 items-center justify-center rounded-3xl bg-white text-black shadow-xl shadow-white/10"
+            aria-label="New Commitment"
+          >
+            <Plus size={25} />
+          </Link>
+
+          <Link
+            href="/history"
+            className="flex flex-1 flex-col items-center justify-center rounded-2xl px-2 py-2 text-xs font-black text-white"
+          >
+            <History size={20} />
+            <span className="mt-1">History</span>
+          </Link>
+
+          <Link
+            href="/profile"
+            className="flex flex-1 flex-col items-center justify-center rounded-2xl px-2 py-2 text-xs font-bold text-white/60"
+          >
+            <Users size={20} />
+            <span className="mt-1">Profile</span>
+          </Link>
+        </div>
+      </nav>
     </>
   );
 }

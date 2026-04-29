@@ -11,10 +11,10 @@ import {
   BellRing,
   CheckCheck,
   CheckCircle2,
-  LogIn,
   Clock3,
   Handshake,
   LockKeyhole,
+  LogIn,
   ShieldCheck,
   Sparkles,
   Users,
@@ -25,43 +25,64 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [checkingUser, setCheckingUser] = useState(true);
 
- useEffect(() => {
-  const checkUser = async () => {
-    try {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
+  useEffect(() => {
+    const checkUser = async () => {
+      try {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
 
-      if (error) {
+        if (error) {
+          await supabase.auth.signOut();
+          setCheckingUser(false);
+          return;
+        }
+
+        if (user) {
+          router.replace("/dashboard");
+          return;
+        }
+
+        setCheckingUser(false);
+      } catch (error) {
+        console.error("Login session check failed:", error);
         await supabase.auth.signOut();
         setCheckingUser(false);
-        return;
       }
+    };
 
-      if (user) {
-        router.replace("/dashboard");
-        return;
-      }
+    checkUser();
+  }, [router]);
 
-      setCheckingUser(false);
-    } catch (error) {
-      console.error("Login session check failed:", error);
-      await supabase.auth.signOut();
-      setCheckingUser(false);
+  const getDashboardRedirectUrl = () => {
+    const currentOrigin = window.location.origin;
+
+    if (currentOrigin.includes("localhost")) {
+      return `${currentOrigin}/dashboard`;
     }
-  };
 
-  checkUser();
-}, [router]);
+    const productionUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+
+    if (productionUrl) {
+      return `${productionUrl}/dashboard`;
+    }
+
+    return `${currentOrigin}/dashboard`;
+  };
 
   const handleGoogleLogin = async () => {
     setLoading(true);
 
+    await supabase.auth.signOut();
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/dashboard`,
+        redirectTo: getDashboardRedirectUrl(),
+        queryParams: {
+          prompt: "select_account",
+        },
       },
     });
 
@@ -171,33 +192,8 @@ export default function LoginPage() {
                   <p className="text-sm font-black">Account-protected access</p>
                   <p className="mt-1 text-xs leading-5 text-white/45">
                     After login, you will go directly to your dashboard.
-                    Your Google account connects your commitments to your real
-                    identity.
                   </p>
                 </div>
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-[22px] border border-white/10 bg-white/[0.05] p-4">
-                <p className="text-2xl font-black">Solo</p>
-                <p className="mt-1 text-xs leading-5 text-white/45">
-                  Personal promises.
-                </p>
-              </div>
-
-              <div className="rounded-[22px] border border-white/10 bg-white/[0.05] p-4">
-                <p className="text-2xl font-black">Mutual</p>
-                <p className="mt-1 text-xs leading-5 text-white/45">
-                  Shared accountability.
-                </p>
-              </div>
-
-              <div className="rounded-[22px] border border-white/10 bg-white/[0.05] p-4">
-                <p className="text-2xl font-black">Done</p>
-                <p className="mt-1 text-xs leading-5 text-white/45">
-                  Visible completion.
-                </p>
               </div>
             </div>
           </motion.section>
